@@ -14,14 +14,13 @@ hero:
     - theme: alt
       text: About me
       link: /about
-features:
-  - title: Physics
-    details: Learning how the world works, from first principles to the details that make a model real.
-  - title: Computing
-    details: Writing software and building computational tools to explore questions and share results.
-  - title: Making
-    details: Turning ideas into experiments, working systems, and things other people can use.
 ---
+<div class="home-feature-grid">
+  <a class="home-feature-card" href="/about"><strong>About</strong><span>Learn about my background and interests.</span><span class="home-feature-link">Read about me →</span></a>
+  <a class="home-feature-card" href="/projects"><strong>Projects</strong><span>Browse projects and experiments.</span><span class="home-feature-link">Explore projects →</span></a>
+  <a class="home-feature-card" href="/notes"><strong>Notes</strong><span>Read notes on physics and computing.</span><span class="home-feature-link">Browse notes →</span></a>
+</div>
+
 
 ## Welcome
 

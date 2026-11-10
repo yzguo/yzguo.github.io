@@ -14,14 +14,13 @@ hero:
     - theme: alt
       text: 了解我
       link: /zh-CN/about
-features:
-  - title: 物理
-    details: 从基本原理到真实模型中的细节，探索世界如何运行。
-  - title: 计算
-    details: 编写软件、构建计算工具，用新的方式研究问题并分享结果。
-  - title: 实践
-    details: 将想法转化为实验、可运行的系统，以及对他人有用的成果。
 ---
+<div class="home-feature-grid">
+  <a class="home-feature-card" href="/zh-CN/about"><strong>关于</strong><span>了解我的背景与兴趣。</span><span class="home-feature-link">了解我 →</span></a>
+  <a class="home-feature-card" href="/zh-CN/projects"><strong>项目</strong><span>浏览项目与实验记录。</span><span class="home-feature-link">浏览项目 →</span></a>
+  <a class="home-feature-card" href="/zh-CN/notes"><strong>笔记</strong><span>阅读物理与计算方面的笔记。</span><span class="home-feature-link">浏览笔记 →</span></a>
+</div>
+
 
 ## 欢迎
 
