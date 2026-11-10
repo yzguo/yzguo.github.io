@@ -36,6 +36,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Check bilingual page parity
+        run: pnpm check:bilingual
+
       - name: Build site
         run: pnpm docs:build
 

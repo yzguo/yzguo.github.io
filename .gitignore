@@ -1,5 +1,6 @@
 .vscode
 .env
+.playwright-cli/
 node_modules
 /docs/.vitepress/.temp/
 /docs/.vitepress/dist/

@@ -1,5 +1,4 @@
 import { defineConfig } from 'vitepress'
-import mathjax3 from 'markdown-it-mathjax3'
 import { withMermaid } from 'vitepress-plugin-mermaid'
 
 const config = {
@@ -62,8 +61,8 @@ const config = {
       label: '简体中文',
       lang: 'zh-CN',
       link: '/zh-CN/',
-      title: '郭言臻',
-      description: '郭言臻——物理、计算与工程。',
+      title: '郭彦禛',
+      description: '郭彦禛——物理、计算与工程。',
       themeConfig: {
         nav: [
           { text: '关于', link: '/zh-CN/about' },

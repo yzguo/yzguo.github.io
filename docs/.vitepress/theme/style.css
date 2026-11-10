@@ -1,38 +1,38 @@
 :root {
-  --vp-c-brand-1: #355b4d;
-  --vp-c-brand-2: #28483d;
-  --vp-c-brand-3: #1e392f;
-  --vp-c-brand-soft: rgba(53, 91, 77, 0.12);
+  --vp-c-brand-1: #2563eb;
+  --vp-c-brand-2: #1d4ed8;
+  --vp-c-brand-3: #1e40af;
+  --vp-c-brand-soft: rgba(37, 99, 235, 0.12);
   --vp-font-family-base: 'Inter', 'Avenir Next', Avenir, 'Segoe UI', sans-serif;
   --vp-font-family-mono: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
-  --vp-home-hero-name-color: #263d35;
+  --vp-home-hero-name-color: #1e3a8a;
   --vp-home-hero-name-background: transparent;
-  --vp-home-hero-image-background-image: linear-gradient(135deg, #f1e7d7 0%, #e8e7df 65%, #dce6df 100%);
+  --vp-home-hero-image-background-image: linear-gradient(135deg, #e8efff 0%, #f7f8fc 58%, #fff2c2 100%);
   --vp-home-hero-image-filter: blur(44px);
 }
 
 .dark {
-  --vp-c-brand-1: #9fc4ad;
-  --vp-c-brand-2: #b7d4c1;
-  --vp-c-brand-3: #d0e4d7;
-  --vp-c-brand-soft: rgba(159, 196, 173, 0.14);
-  --vp-home-hero-name-color: #d8e7dc;
+  --vp-c-brand-1: #93c5fd;
+  --vp-c-brand-2: #bfdbfe;
+  --vp-c-brand-3: #dbeafe;
+  --vp-c-brand-soft: rgba(147, 197, 253, 0.14);
+  --vp-home-hero-name-color: #bfdbfe;
 }
 
 :root {
-  --vp-c-bg: #f8f7f4;
-  --vp-c-bg-alt: #f0efea;
-  --vp-c-bg-soft: #f0efea;
-  --vp-c-divider: #e4e1d9;
-  --vp-c-gutter: #e4e1d9;
+  --vp-c-bg: #f8f9fc;
+  --vp-c-bg-alt: #f1f4fb;
+  --vp-c-bg-soft: #f1f4fb;
+  --vp-c-divider: #dce3f0;
+  --vp-c-gutter: #dce3f0;
 }
 
 .dark {
-  --vp-c-bg: #171b19;
-  --vp-c-bg-alt: #1c2220;
-  --vp-c-bg-soft: #222927;
-  --vp-c-divider: #303936;
-  --vp-c-gutter: #303936;
+  --vp-c-bg: #111827;
+  --vp-c-bg-alt: #172033;
+  --vp-c-bg-soft: #1e293b;
+  --vp-c-divider: #334155;
+  --vp-c-gutter: #334155;
 }
 
 .VPNavBarTitle .title {

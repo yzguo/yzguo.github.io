@@ -5,8 +5,8 @@ hero:
   text: "Physics, made tangible."
   tagline: "I’m a physics student at USTC, curious about the places where scientific ideas meet computation and engineering. This is my corner of the internet for projects, notes, and experiments."
   image:
-    src: /portrait.svg
-    alt: Abstract orbital illustration
+    src: https://avatars.githubusercontent.com/u/153804306?v=4
+    alt: Yanzhen Guo's GitHub profile photo
   actions:
     - theme: brand
       text: Explore projects
