@@ -1,23 +1,20 @@
 import { defineConfig } from 'vitepress'
 
 export const shared = defineConfig({
-    title: 'Office Tool Plus',
-
+    title: 'Yanzhen Guo',
     metaChunk: true,
-
     themeConfig: {
         logo: '/favicon.ico',
-
-        socialLinks: [
-            { icon: 'tencentqq', link: 'https://blog.yerong.org/contact-us.html' },
-            { icon: 'wechat', link: 'https://mp.weixin.qq.com/s/MQTr2Gj2l3Yw_R6tLKFHPQ' },
-            { icon: 'telegram', link: 'https://t.me/s/otp_channel/' },
-            { icon: 'discord', link: 'https://discord.gg/TpXTgfgf2a' },
-            { icon: 'github', link: 'https://github.com/YerongAI/Office-Tool' }
-        ],
-
-        search: {
-            provider: 'local'
+        socialLinks: [{ icon: 'github', link: 'https://github.com/yzguo' }],
+        search: { provider: 'local' }
+    },
+    // Keep existing homepage Markdown intact while retiring its old doc routes.
+    transformPageData(pageData) {
+        if (!['index.md', 'zh-cn/index.md'].includes(pageData.relativePath)) return
+        const prefix = pageData.relativePath.startsWith('zh-cn/') ? '/zh-cn' : ''
+        for (const action of pageData.frontmatter.hero?.actions ?? []) {
+            if (action.link === prefix + '/introduction/what-is-otp') action.link = prefix + '/About/'
+            if (action.link === prefix + '/introduction/download') action.link = prefix + '/Projects/'
         }
     }
 })
