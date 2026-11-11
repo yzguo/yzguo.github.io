@@ -6,8 +6,8 @@ hero:
   text: "A powerful and useful tool for Office deployments."
   tagline: Documentation for quick start and usage.
   image:
-    src: /images/office-tool-plus-logo-large.webp
-    alt: Office Tool Plus logo
+    src: /images/pic.png
+    alt: Yanzhen Guo
   actions:
     - theme: brand
       text: Start

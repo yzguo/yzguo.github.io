@@ -1,14 +1,43 @@
-import { defineConfig } from 'vitepress'
+import { defineConfig, type DefaultTheme } from 'vitepress'
 
 export const en_us = defineConfig({
     lang: 'en-US',
     description: "Yanzhen Guo's personal homepage.",
     themeConfig: {
-        nav: [{ text: 'About', link: '/About/' },
-            { text: 'Projects', link: '/Projects/' },
-            { text: 'Blogs', link: '/Blogs/' }],
-        sidebar: [{ text: 'About', link: '/About/' },
-            { text: 'Projects', link: '/Projects/' },
-            { text: 'Blogs', link: '/Blogs/' }]
+        nav: [
+            { text: 'About', link: '/About/', activeMatch: '^/About/' },
+            { text: 'Projects', link: '/Projects/', activeMatch: '^/Projects/' },
+            { text: 'Blogs', link: '/Blogs/', activeMatch: '^/Blogs/' }
+        ],
+        sidebar: {
+            '/About/': { base: '/About/', items: sidebarAbout() },
+            '/Projects/': { base: '/Projects/', items: sidebarProjects() },
+            '/Blogs/': { base: '/Blogs/', items: sidebarBlogs() }
+        },
+        editLink: {
+            pattern: 'https://github.com/yzguo/yzguo.github.io/edit/main/docs/:path',
+            text: "Edit this page on GitHub"
+        },
+        docFooter: {"prev":"← Previous page","next":"Next page →"},
+        outline: {"label":"On this page"},
+        lastUpdated: {"text":"Last updated","formatOptions":{"dateStyle":"short","timeStyle":"medium"}},
+        langMenuLabel: "Languages",
+        returnToTopLabel: "Return to top",
+        sidebarMenuLabel: "Menu",
+        darkModeSwitchLabel: "Appearance",
+        lightModeSwitchTitle: "Switch to light theme",
+        darkModeSwitchTitle: "Switch to dark theme"
     }
 })
+
+function sidebarAbout(): DefaultTheme.SidebarItem[] {
+    return [{ text: 'About', link: '' }]
+}
+
+function sidebarProjects(): DefaultTheme.SidebarItem[] {
+    return [{ text: 'Projects', link: '' }]
+}
+
+function sidebarBlogs(): DefaultTheme.SidebarItem[] {
+    return [{ text: 'Blogs', link: '' }]
+}
