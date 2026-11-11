@@ -7,7 +7,7 @@ I’m drawn to questions that reward both careful thought and practical explorat
 ## What you’ll find here
 
 - **Projects** — selected things I’ve built or explored.
-- **Notes** — explanations, learning notes, and ideas I want to remember.
+- **Blog** — articles about things I’m learning and exploring.
 - **Experiments** — occasional reports from trying something out.
 
 ## Links

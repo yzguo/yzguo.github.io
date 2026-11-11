@@ -11,13 +11,13 @@ English pages live in `docs/`; Chinese translations live in `docs/zh-CN/`. Keep 
 | Home | `docs/index.md` | `docs/zh-CN/index.md` |
 | About | `docs/about.md` | `docs/zh-CN/about.md` |
 | Projects | `docs/projects.md` | `docs/zh-CN/projects.md` |
-| Notes | `docs/notes/` | `docs/zh-CN/notes/` |
+| Blog | `docs/blog/` | `docs/zh-CN/blog/` |
 
 Create Markdown files under the relevant directory and link them from its index. The appearance follows the operating system by default; visitors can switch between light and dark themes.
 
 ## Math and diagrams
 
-Use LaTeX math delimiters (`$...$` inline, `$$...$$` display) and fenced `mermaid` code blocks. See Notes → Rich Markdown examples for working samples.
+Use LaTeX math delimiters (`$...$` inline, `$$...$$` display) and fenced `mermaid` code blocks. See Blog → Math and diagram examples for working samples.
 
 ## Preview locally
 

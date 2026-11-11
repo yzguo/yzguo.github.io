@@ -1,5 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
-  <rect x="2" y="2" width="44" height="44" rx="14" fill="#1e3a8a"/>
-  <path d="M12 14h24L18 34h18" stroke="#fff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="35" cy="13" r="4" fill="#facc15"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><clipPath id="avatar"><circle cx="32" cy="32" r="31"/></clipPath></defs><image href="https://avatars.githubusercontent.com/u/153804306?v=4" width="64" height="64" preserveAspectRatio="xMidYMid slice" clip-path="url(#avatar)"/></svg>

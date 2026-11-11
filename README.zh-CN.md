@@ -11,13 +11,13 @@
 | 首页 | `docs/index.md` | `docs/zh-CN/index.md` |
 | 关于 | `docs/about.md` | `docs/zh-CN/about.md` |
 | 项目 | `docs/projects.md` | `docs/zh-CN/projects.md` |
-| 笔记 | `docs/notes/` | `docs/zh-CN/notes/` |
+| 博客 | `docs/blog/` | `docs/zh-CN/blog/` |
 
 在对应目录下创建 Markdown 文件，并从栏目索引页添加链接。网站默认跟随系统浅色/深色主题，访客也可以手动切换。
 
 ## 数学公式与图表
 
-数学公式使用 LaTeX 定界符（行内 `$...$`，独立公式 `$$...$$`）；Mermaid 图表使用围栏代码块并标记为 `mermaid`。可查看 Notes → Markdown 扩展示例。
+数学公式使用 LaTeX 定界符（行内公式 `$...$`、独立公式 `$$...$$`）；Mermaid 图表使用 `mermaid` 围栏代码块。示例请看博客中的“数学与图表示例”。
 
 ## 本地预览
 
