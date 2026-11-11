@@ -1,0 +1,82 @@
+# Office 工具 {#office-tools}
+
+Office 工具位于`工具箱`页面 -> `Office 工具`部分。
+
+## 移除 Office {#remove-office}
+
+此功能支持移除所有版本的 Office.
+
+如果移除 Office 出现了某些文件无法访问的问题，你可以多试几次，也可以手动找到文件删除。
+
+当你启用**同时移除 Microsoft Store 版本的 Office** 时，程序会执行如下 PowerShell 命令以删除微软商店版本的 Office：
+
+``` powershell
+Get-AppxPackage -name "Microsoft.Office.Desktop" | Remove-AppxPackage
+```
+
+当你启用**同时清除激活信息**时，Office Tool Plus 会同时卸载所有 Office 许可证和产品密钥。
+
+获取详细信息请访问[从 PC 卸载 Office](https://support.microsoft.com/zh-cn/office/从-pc-卸载-office-9dd49b83-264a-477a-8fcc-2fdf5dbf61d8)
+
+## 更改 Office 更新通道 {#change-office-update-channel}
+
+此功能可以更改 Office 更新通道，从而实现不重装进行 Office 的升级/降级。
+
+::: warning 注意
+
+Office 企业版长期通道被锁定，一般情况下无法更改，也无法从别的通道更改到此通道。
+
+:::
+
+## 更改 Office 产品属于者 {#change-office-product-owner}
+
+Office 产品属于者指的是许可证的属于者，例如下图中的 *Yerong™ | NekoNeko*：
+
+![Product owner](/images/zh-cn/product-owner.webp)
+
+直接设置新的名称时，Office Tool Plus 会尝试更改所有已安装的 Office 产品的名称。如果您需要更改某个许可证的名称，请按照以下方法进行。
+
+::: warning 注意
+
+Office Tool Plus 无法识别您自行安装的 Office 传统许可证，因此您需要手动为安装的许可证设置名称。
+
+:::
+
+::: details 更改 vNext 许可证的属于者
+
+你现在可以直接从许可证列表中设置属于者名称了。
+
+![设置 vNext 许可证名称](/images/zh-cn/activation/set-vNext-license-name.webp)
+
+在许可证列表中，找到你想更改名称的许可证。点击**设置名称**按钮，输入新的名称。之后，重启你的 Office 应用程序即可看到新的名称。
+
+:::
+
+::: details 更改 Office 传统许可证的属于者
+
+在部署页面查看您已安装的产品的 ID，例如 `ProPlus2021Volume` 或 `VisioPro2021Volume`。
+
+然后回到工具箱，在**更改 Office 产品属于者**中按照以下格式输入 `[Product ID]:[Name]`
+
+Product ID 为产品 ID，Name 是你想设置的名字，例如：`ProPlus2021Volume:小明`
+
+填写完成后，点击**设置名称**按钮，重启你的 Office 应用程序即可看到新的名称。
+
+::: warning 注意
+
+如果您自行安装了其他 Office 许可证并激活，请在上文中输入您安装的许可证的 ID，而不是已安装的产品的 ID。
+
+:::
+
+## 重置 Office 设置为默认设置 {#reset-office-settings-to-defaults}
+
+重置 Office 设置可以解决某些问题。请根据需要使用。
+
+![重置 Office 为默认设置的截图](/images/zh-cn/toolbox/reset-office-to-default-settings.webp)
+
+::: details 适用情况
+
+- Office 许可证已通过 KMS 或 MAK 激活，但是 Office 应用程序要求使用 Microsoft 365 订阅。
+- 我们注意到你更新了你的许可证，请重新启动 Microsoft Project 以使更改生效。
+
+:::
