@@ -10,8 +10,8 @@ const config = {
     math: true
   },
   head: [
-    ['meta', { name: 'theme-color', content: '#f8f7f4' }],
-    ['link', { rel: 'icon', href: '/favicon.svg', type: 'image/svg+xml' }]
+    ['meta', { name: 'theme-color', content: '#0b1220' }],
+    ['link', { rel: 'icon', href: 'https://avatars.githubusercontent.com/u/153804306?v=4', type: 'image/png' }]
   ],
   themeConfig: {
     siteTitle: 'Yanzhen Guo',
@@ -35,7 +35,10 @@ const config = {
         nav: [
           { text: 'About', link: '/about' },
           { text: 'Projects', link: '/projects' },
-          { text: 'Notes', link: '/notes' }
+          { text: 'Notes', link: '/notes' },
+          { text: 'QQ', link: 'https://wpa.qq.com/msgrd?v=3&uin=2912008839&site=qq&menu=yes' },
+          { text: 'Signal', link: 'https://signal.me/#eu/EricGuo.06' },
+          { text: 'Telegram', link: 'https://t.me/guoyz' }
         ],
         sidebar: {
           '/notes/': [{ text: 'Notes', items: [
@@ -67,7 +70,10 @@ const config = {
         nav: [
           { text: '关于', link: '/zh-CN/about' },
           { text: '项目', link: '/zh-CN/projects' },
-          { text: '笔记', link: '/zh-CN/notes' }
+          { text: '笔记', link: '/zh-CN/notes' },
+          { text: 'QQ', link: 'https://wpa.qq.com/msgrd?v=3&uin=2912008839&site=qq&menu=yes' },
+          { text: 'Signal', link: 'https://signal.me/#eu/EricGuo.06' },
+          { text: 'Telegram', link: 'https://t.me/guoyz' }
         ],
         sidebar: {
           '/zh-CN/notes/': [{ text: '笔记', items: [
