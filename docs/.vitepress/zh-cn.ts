@@ -8,12 +8,12 @@ export const zh_cn = defineConfig({
         nav: [
             { text: '关于', link: '/zh-cn/About/', activeMatch: '^/zh-cn/About/' },
             { text: '项目', link: '/zh-cn/Projects/', activeMatch: '^/zh-cn/Projects/' },
-            { text: '博客', link: '/zh-cn/Blogs/', activeMatch: '^/zh-cn/Blogs/' }
+            { text: '博客与笔记', link: '/zh-cn/Blogs/', activeMatch: '^/zh-cn/Blogs/' }
         ],
         sidebar: {
-            '/zh-cn/About/': { base: '/zh-cn/About/', items: sidebarAbout() },
-            '/zh-cn/Projects/': { base: '/zh-cn/Projects/', items: sidebarProjects() },
-            '/zh-cn/Blogs/': { base: '/zh-cn/Blogs/', items: sidebarBlogs() }
+            '/zh-cn/About/': sidebarAbout(),
+            '/zh-cn/Projects/': sidebarProjects(),
+            '/zh-cn/Blogs/': sidebarBlogs()
         },
         editLink: {
             pattern: 'https://github.com/yzguo/yzguo.github.io/edit/main/docs/:path',
@@ -41,7 +41,7 @@ function sidebarProjects(): DefaultTheme.SidebarItem[] {
 
 function sidebarBlogs(): DefaultTheme.SidebarItem[] {
     return [{
-        text: '文档与笔记',
+        text: '博客与笔记',
         link: '/zh-cn/Blogs/',
         items: [
             {

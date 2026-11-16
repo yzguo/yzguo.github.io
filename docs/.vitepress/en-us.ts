@@ -7,12 +7,12 @@ export const en_us = defineConfig({
         nav: [
             { text: 'About', link: '/About/', activeMatch: '^/About/' },
             { text: 'Projects', link: '/Projects/', activeMatch: '^/Projects/' },
-            { text: 'Blogs', link: '/Blogs/', activeMatch: '^/Blogs/' }
+            { text: 'Blogs and notes', link: '/Blogs/', activeMatch: '^/Blogs/' }
         ],
         sidebar: {
-            '/About/': { base: '/About/', items: sidebarAbout() },
-            '/Projects/': { base: '/Projects/', items: sidebarProjects() },
-            '/Blogs/': { base: '/Blogs/', items: sidebarBlogs() }
+            '/About/': sidebarAbout(),
+            '/Projects/': sidebarProjects(),
+            '/Blogs/': sidebarBlogs()
         },
         editLink: {
             pattern: 'https://github.com/yzguo/yzguo.github.io/edit/main/docs/:path',
@@ -40,7 +40,7 @@ function sidebarProjects(): DefaultTheme.SidebarItem[] {
 
 function sidebarBlogs(): DefaultTheme.SidebarItem[] {
     return [{
-        text: 'Blogs',
+        text: 'Blogs and notes',
         link: '/Blogs/',
         items: [
             {
