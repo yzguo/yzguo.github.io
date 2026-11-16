@@ -1,48 +1,32 @@
 ---
 layout: home
-
 hero:
-  name: "Office Tool Plus"
-  text: "A powerful and useful tool for Office deployments."
-  tagline: Documentation for quick start and usage.
+  name: "Yanzhen Guo"
+  text: "Personal website"
+  tagline: A home for my thoughts, projects, and writing.
   image:
     src: /images/pic.png
-    alt: Yanzhen Guo
+    alt: Yanzhen Guo's profile photo
   actions:
     - theme: brand
-      text: Start
-      link: /introduction/what-is-otp
+      text: Blog and notes
+      link: /Blogs/
     - theme: alt
-      text: Homepage
-      link: https://otp.landian.vip/
+      text: About
+      link: /About/
     - theme: alt
-      text: Download
-      link: /introduction/download
-
-features:
-  - title: Simple
-    icon: 📝
-    details: Deploy Office in just a few steps.
-  - title: Powerful
-    icon: 🚀
-    details: Rich features, full support of customize.
-  - title: Convenient
-    icon: 💯
-    details: Best UI for everything.
-  - title: Free
-    icon: ⭐
-    details: No Ads, no data is collected.
-  - title: Safe
-    icon: 💡
-    details: Digital signatures, ensure system security.
-  - title: Accessibility
-    icon: ❤️
-    details: Optimized for screen readers.
+      text: Projects
+      link: /Projects/
 ---
 
-<style>
-:root {
-  --vp-home-hero-name-color: transparent;
-  --vp-home-hero-name-background: -webkit-linear-gradient(120deg, #0078D4 45%, #41d1ff);
-}
-</style>
+<div class="home-feature-grid">
+  <a class="home-feature-card" href="/About/"><strong>About</strong><span>Learn about my education, interests, and ways to contact me.</span><span class="home-feature-link">About me →</span></a>
+  <a class="home-feature-card" href="/Projects/"><strong>Projects</strong><span>Browse projects I have contributed to or am documenting.</span><span class="home-feature-link">View projects →</span></a>
+  <a class="home-feature-card" href="/Blogs/"><strong>Docs and notes</strong><span>Browse course, learning, and work topics.</span><span class="home-feature-link">Browse docs and notes →</span></a>
+</div>
+
+## Welcome
+
+I’m Yanzhen, an undergraduate physics student at the University of Science and Technology of China ([USTC](https://www.ustc.edu.cn/)). I like understanding how things work and then finding a way to build, model, or explain them.
+
+This site is a living notebook: a place for work in progress, finished projects, and ideas worth keeping. It is built from Markdown, so its content can grow without a web-development workflow.

@@ -3,11 +3,12 @@ import { defineConfig, type DefaultTheme } from 'vitepress'
 export const zh_cn = defineConfig({
     lang: 'zh-CN',
     description: "个人主页。",
+    title: '郭彦禛',
     themeConfig: {
         nav: [
-            { text: 'About', link: '/zh-cn/About/', activeMatch: '^/zh-cn/About/' },
-            { text: 'Projects', link: '/zh-cn/Projects/', activeMatch: '^/zh-cn/Projects/' },
-            { text: 'Blogs', link: '/zh-cn/Blogs/', activeMatch: '^/zh-cn/Blogs/' }
+            { text: '关于', link: '/zh-cn/About/', activeMatch: '^/zh-cn/About/' },
+            { text: '项目', link: '/zh-cn/Projects/', activeMatch: '^/zh-cn/Projects/' },
+            { text: '博客', link: '/zh-cn/Blogs/', activeMatch: '^/zh-cn/Blogs/' }
         ],
         sidebar: {
             '/zh-cn/About/': { base: '/zh-cn/About/', items: sidebarAbout() },
@@ -31,13 +32,33 @@ export const zh_cn = defineConfig({
 })
 
 function sidebarAbout(): DefaultTheme.SidebarItem[] {
-    return [{ text: 'About', link: '' }]
+    return [{ text: '关于', link: '/zh-cn/About/' }]
 }
 
 function sidebarProjects(): DefaultTheme.SidebarItem[] {
-    return [{ text: 'Projects', link: '' }]
+    return [{ text: '项目', link: '/zh-cn/Projects/' }]
 }
 
 function sidebarBlogs(): DefaultTheme.SidebarItem[] {
-    return [{ text: 'Blogs', link: '' }]
+    return [{
+        text: '文档与笔记',
+        link: '/zh-cn/Blogs/',
+        items: [
+            {
+                text: '课程笔记',
+                link: '/zh-cn/Blogs/Courses/',
+                items: [{ text: '课程笔记演示', link: '/zh-cn/Blogs/Courses/demo' }]
+            },
+            {
+                text: '学习笔记',
+                link: '/zh-cn/Blogs/Learning/',
+                items: [{ text: '学习笔记演示', link: '/zh-cn/Blogs/Learning/demo' }]
+            },
+            {
+                text: '工作笔记',
+                link: '/zh-cn/Blogs/Work/',
+                items: [{ text: '工作笔记演示', link: '/zh-cn/Blogs/Work/demo' }]
+            }
+        ]
+    }]
 }

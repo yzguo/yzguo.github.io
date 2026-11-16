@@ -1,35 +1,33 @@
-# Personal Homepage
+# Yanzhen Guo — personal website
 
-VitePress personal site with English at / and Simplified Chinese at /zh-cn/.
-Each language has About/, Projects/, and Blogs/ directories with title-only placeholders.
-The two existing homepage index.md files are preserved. Their old internal documentation
-buttons are mapped to About and Projects during the build.
+A bilingual Markdown-first personal website built with VitePress and deployed to GitHub Pages.
 
-## Local development and deployment
+- English site: <https://yzguo.github.io/>
+- 简体中文: <https://yzguo.github.io/zh-cn/>
 
-- pnpm install --frozen-lockfile
-- pnpm docs:dev
-- pnpm docs:build
-- pnpm docs:preview
+## Content layout
 
-GitHub Pages builds use pnpm and publish docs/.vitepress/dist.
-The inherited Office Tool custom domain has been removed.
+- `docs/About/` and `docs/zh-cn/About/` — biography and education.
+- `docs/Projects/` and `docs/zh-cn/Projects/` — project index and pages.
+- `docs/Blogs/` and `docs/zh-cn/Blogs/` — course, learning, and work notes.
 
-## Writing
+The Blogs section has separate `Courses/`, `Learning/`, and `Work/` folders. Each category contains an index and a demo page. Copy a demo Markdown page, add it to the category index, and replace its example prompts with your content. Create further subfolders whenever a category grows.
 
-Add Markdown under docs/About, docs/Projects, docs/Blogs and the corresponding
-folders inside docs/zh-cn. Inline formulas use $E = mc^2$.
-Display formulas use a line containing $$, then the equation, then another $$ line.
-Diagrams use fenced code blocks with the language mermaid, for example:
+English pages live under `docs/`; their Simplified Chinese counterparts live at the same paths under `docs/zh-cn/`. Keep the paired pages in sync when adding content.
 
-```mermaid
-flowchart LR
-  A[Write Markdown] --> B[Build] --> C[Personal homepage]
+## Local development
+
+Requires Node.js and pnpm:
+
+```sh
+pnpm install --frozen-lockfile
+pnpm docs:dev
 ```
 
-MathJax renders formulas to inline SVG during the build (no browser math script).
-Mermaid and its lazy-loaded diagram chunks are bundled into this site's assets.
-VitePress fonts, search, styles and scripts are hosted locally. Analytics is removed,
-and the content security policy blocks external runtime resources.
-External homepage links remain as requested; they load only when clicked.
-Installing dependencies still requires a package registry.
+Build and preview the production site with `pnpm docs:build` and `pnpm docs:preview`.
+
+## Deployment
+
+Pushes to `main` run `.github/workflows/static.yml`, which builds the site and deploys `docs/.vitepress/dist` to GitHub Pages. Set the repository Pages source to **GitHub Actions**.
+
+Markdown supports LaTeX math and Mermaid diagrams. See the blog demo pages for examples.

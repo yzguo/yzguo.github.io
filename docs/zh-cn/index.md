@@ -1,51 +1,30 @@
 ---
 layout: home
-
 hero:
-  name: "Office Tool Plus"
-  text: "一个强大且实用的 Office 部署工具"
-  tagline: 快速入门和技术文档
+  name: "郭彦禛"
+  text: "个人网站"
+  tagline: 碎碎念喵
   image:
     src: /images/pic.png
-    alt: Yanzhen Guo
+    alt: 郭彦禛的头像
   actions:
     - theme: brand
-      text: 开始
-      link: /zh-cn/introduction/what-is-otp
+      text: 笔记与博客
+      link: /zh-cn/Blogs/
     - theme: alt
-      text: 主页
-      link: https://otp.landian.vip/
+      text: 关于
+      link: /zh-cn/About/
     - theme: alt
-      text: 下载
-      link: /zh-cn/introduction/download
-    - theme: alt
-      text: 博客
-      link: https://blog.yerong.org/
-
-features:
-  - title: 简单
-    icon: 📝
-    details: 几步配置，即可立即部署 Office。
-  - title: 强大
-    icon: 🚀
-    details: 丰富功能，完整的自定义支持。
-  - title: 更方便
-    icon: 💯
-    details: 可靠的 UI，所有功能一键直达。
-  - title: 免费
-    icon: ⭐
-    details: 完全免费，没有强制性的广告。
-  - title: 安全
-    icon: 💡
-    details: 数字签名，保障程序和系统安全。
-  - title: 无障碍
-    icon: ❤️
-    details: 特别设计，专为屏幕阅读器进行优化。
+      text: 项目
+      link: /zh-cn/Projects/
 ---
 
-<style>
-:root {
-  --vp-home-hero-name-color: transparent;
-  --vp-home-hero-name-background: -webkit-linear-gradient(120deg, #0078D4 45%, #41d1ff);
-}
-</style>
+<div class="home-feature-grid">
+  <a class="home-feature-card" href="/zh-cn/About/"><strong>关于</strong><span>了解我的学习经历、兴趣与联系方式。</span><span class="home-feature-link">了解我 →</span></a>
+  <a class="home-feature-card" href="/zh-cn/Projects/"><strong>项目</strong><span>浏览我参与或正在整理的项目。</span><span class="home-feature-link">查看项目 →</span></a>
+  <a class="home-feature-card" href="/zh-cn/Blogs/"><strong>文档与笔记</strong><span>按课程、学习和工作主题分类阅读。</span><span class="home-feature-link">浏览文档与笔记 →</span></a>
+</div>
+
+## 欢迎
+
+欢迎来到我的个人网站。这里会逐步整理我的学习经历、项目，以及课程、学习和工作中的记录。

@@ -9,7 +9,8 @@
   "scripts": {
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
-    "docs:preview": "vitepress preview docs"
+    "docs:preview": "vitepress preview docs",
+    "check:bilingual": "node scripts/check-bilingual.mjs"
   },
   "allowScripts": {
     "esbuild@0.27.7": true

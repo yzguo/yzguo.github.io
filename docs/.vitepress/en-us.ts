@@ -31,13 +31,33 @@ export const en_us = defineConfig({
 })
 
 function sidebarAbout(): DefaultTheme.SidebarItem[] {
-    return [{ text: 'About', link: '' }]
+    return [{ text: 'About', link: '/About/' }]
 }
 
 function sidebarProjects(): DefaultTheme.SidebarItem[] {
-    return [{ text: 'Projects', link: '' }]
+    return [{ text: 'Projects', link: '/Projects/' }]
 }
 
 function sidebarBlogs(): DefaultTheme.SidebarItem[] {
-    return [{ text: 'Blogs', link: '' }]
+    return [{
+        text: 'Blogs',
+        link: '/Blogs/',
+        items: [
+            {
+                text: 'Course notes',
+                link: '/Blogs/Courses/',
+                items: [{ text: 'Course notes demo', link: '/Blogs/Courses/demo' }]
+            },
+            {
+                text: 'Learning notes',
+                link: '/Blogs/Learning/',
+                items: [{ text: 'Learning notes demo', link: '/Blogs/Learning/demo' }]
+            },
+            {
+                text: 'Work notes',
+                link: '/Blogs/Work/',
+                items: [{ text: 'Work notes demo', link: '/Blogs/Work/demo' }]
+            }
+        ]
+    }]
 }

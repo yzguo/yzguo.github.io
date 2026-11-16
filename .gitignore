@@ -1,6 +1,7 @@
 node_modules
 .vscode
 .env
+.playwright-cli/
 /docs/.vitepress/.temp/
 /docs/.vitepress/dist/
 /docs/.vitepress/cache/
