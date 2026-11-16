@@ -1,5 +1,5 @@
 # Course notes
 
-Create one article per course to collect lecture material, key concepts, and review outlines. Add subfolders by term or course as the collection grows.
+Notes are organized by course. Each page collects lecture material, key concepts, and questions to review before an exam.
 
-- [Course notes demo](/Blogs/Courses/demo) — an example page structure.
+- [Course notes demo](/Blogs/Courses/demo) — a sample note on the small-angle pendulum, with inline formulas, a block equation, and a Mermaid diagram.

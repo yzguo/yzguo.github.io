@@ -1,17 +1,15 @@
-# Blogs
+# Blogs and notes
 
-Articles are organized into course notes, learning notes, and work notes. Each category can contain multiple pages and deeper subfolders.
+I keep three kinds of notes here: course notes, learning notes, and work notes.
 
 ## Course notes
 
-Course material, key concepts, and review outlines. [Browse course notes →](/Blogs/Courses/)
+Lecture material, key concepts, and review outlines. [Browse course notes →](/Blogs/Courses/)
 
 ## Learning notes
 
-Takeaways from independent study, reading, and practice. [Browse learning notes →](/Blogs/Learning/)
+Reading, practice, and small experiments. [Browse learning notes →](/Blogs/Learning/)
 
 ## Work notes
 
-Project logs, work records, and progress summaries. [Browse work notes →](/Blogs/Work/)
-
-Each category includes a demo article whose structure you can copy and replace with your own content.
+Project logs, work records, and summaries written at the end of a stage. [Browse work notes →](/Blogs/Work/)

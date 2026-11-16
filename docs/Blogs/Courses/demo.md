@@ -1,25 +1,44 @@
 # Course notes demo
 
-This is a starter page for one course. Copy it, rename the file, and replace the prompts with your notes.
+This is a sample course note, not a record of a real course. It uses a simple pendulum to show one way to organize the page.
 
 ## Course information
 
-- Course:
-- Term:
-- Instructor or source:
+- Course: Mechanics (sample)
+- Term: Fall 2025 (sample)
+- Instructor or source: textbook, chapter 2 (sample)
 
-## Topic
+## Example: the small-angle pendulum
 
-Summarize the lecture or chapter in your own words. Add equations, diagrams, and code examples when useful.
+A simple pendulum of length $L$ swings under gravity. At small angles, its motion obeys
+
+$$
+\ddot{\theta} + \frac{g}{L}\theta = 0,
+$$
+
+where $\theta$ is the angle between the string and the vertical. The period is then
+
+$$
+T = 2\pi\sqrt{\frac{L}{g}}.
+$$
+
+The path from the approximation to the result is short:
+
+```mermaid
+flowchart TD
+    A[Small angle] --> B[Equation of motion]
+    B --> C[Period T]
+```
 
 ## Key concepts
 
-- Concept — definition and an example.
+- Small-angle approximation — replace $\sin\theta$ with $\theta$, which makes the equation linear.
+- Period — the time for one complete swing, $T$ in the formula above.
 
 ## Questions to revisit
 
-- Add questions for later review.
+- What changes when the angle is no longer small?
 
 ## References
 
-- Add textbooks, lecture slides, or source links.
+- Textbook chapter on oscillations (sample reference).

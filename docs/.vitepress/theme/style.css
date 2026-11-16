@@ -1,0 +1,45 @@
+/*
+ * Site typography.
+ *
+ * Fonts are all served from this origin (see the @font-face declarations in
+ * ./fonts). The order matters and is intentional:
+ *   1. Latin Modern Roman - Latin script / LaTeX text faces.
+ *   2. Symbols Nerd Font   - private-use and legacy icon glyphs only.
+ *   3. Noto Emoji          - monochrome default-presentation emoji.
+ *   4. Twemoji Mozilla     - local color fallback for VS16 emoji and keycaps.
+ *   5. Noto Sans SC        - CJK glyphs, with Latin letters excluded by
+ *                            unicode-range in ./fonts/noto-sans-sc.css.
+ * No CDN URLs or system font names are used, so the rendered typography does
+ * not depend on fonts installed on the visitor's machine.
+ *
+ * VitePress' base theme declares --vp-font-family-base on :root. The
+ * :root[lang] selector below deliberately outranks that declaration for both
+ * the English and Chinese locales.
+ */
+:root[lang] {
+  --vp-font-family-base:
+    'Latin Modern Roman', 'Symbols Nerd Font', 'Noto Emoji', 'Twemoji Mozilla',
+    'Noto Sans SC';
+  --vp-font-family-mono:
+    'Latin Modern Mono', 'Symbols Nerd Font', 'Noto Emoji', 'Twemoji Mozilla',
+    'Noto Sans SC';
+}
+
+/*
+ * Keep form controls on the same self-hosted stack. VitePress otherwise
+ * leaves controls to the browser's UI font. Mermaid SVG text is handled by
+ * the scoped rules in LocalMermaid.vue; MathJax SVG paths are left untouched.
+ */
+html[lang],
+body,
+button,
+input,
+select,
+textarea {
+  font-family: var(--vp-font-family-base);
+}
+
+/*
+ * MathJax renders formulas as SVG paths (the site keeps Markdown-it MathJax's
+ * default SVG output), so math does not use these text faces.
+ */

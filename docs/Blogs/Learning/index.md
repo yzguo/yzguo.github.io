@@ -1,5 +1,5 @@
 # Learning notes
 
-A place for independent study, reading notes, experiments, and what I learned along the way. Create subfolders for subjects as needed.
+Notes from reading, practice, and small experiments.
 
-- [Learning notes demo](/Blogs/Learning/demo) — an example page structure.
+- [Learning notes demo](/Blogs/Learning/demo) — a sample note on why a prism separates white light.

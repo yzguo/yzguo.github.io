@@ -1,8 +1,5 @@
 # Projects
 
-Projects I have contributed to or am documenting. Each project page can describe its background, my contributions, implementation, and related links.
+I'm still putting project pages together. Once they are ready, each one will appear here with a short description and links to code or notes.
 
-| Project | Summary | Date | Links |
-| --- | --- | --- | --- |
-
-To add a project, create a Markdown page in this directory and link it from the table above.
+For now, you can find me on [GitHub](https://github.com/yzguo).

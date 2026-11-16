@@ -1,5 +1,5 @@
 # Work notes
 
-Project journals, work records, and periodic summaries. Create a subfolder for each project or workstream.
+Project logs, work records, and summaries at the end of a stage.
 
-- [Work notes demo](/Blogs/Work/demo) — an example page structure.
+- [Work notes demo](/Blogs/Work/demo) — a sample project log about organizing a reading group's notes.

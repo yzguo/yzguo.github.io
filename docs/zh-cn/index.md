@@ -3,13 +3,13 @@ layout: home
 hero:
   name: "郭彦禛"
   text: "个人网站"
-  tagline: 碎碎念喵
+  tagline: "碎碎念喵"
   image:
     src: /images/pic.png
     alt: 郭彦禛的头像
   actions:
     - theme: brand
-      text: 笔记与博客
+      text: 博客与笔记
       link: /zh-cn/Blogs/
     - theme: alt
       text: 关于
@@ -17,14 +17,21 @@ hero:
     - theme: alt
       text: 项目
       link: /zh-cn/Projects/
+features:
+  - title: 关于
+    details: 学习经历、兴趣与联系方式。
+    link: /zh-cn/About/
+    linkText: 了解我
+  - title: 项目
+    details: 我参与或正在整理的项目。
+    link: /zh-cn/Projects/
+    linkText: 查看项目
+  - title: 博客与笔记
+    details: 课程、学习与工作笔记。
+    link: /zh-cn/Blogs/
+    linkText: 阅读笔记
 ---
-
-<div class="home-feature-grid">
-  <a class="home-feature-card" href="/zh-cn/About/"><strong>关于</strong><span>了解我的学习经历、兴趣与联系方式。</span><span class="home-feature-link">了解我 →</span></a>
-  <a class="home-feature-card" href="/zh-cn/Projects/"><strong>项目</strong><span>浏览我参与或正在整理的项目。</span><span class="home-feature-link">查看项目 →</span></a>
-  <a class="home-feature-card" href="/zh-cn/Blogs/"><strong>文档与笔记</strong><span>按课程、学习和工作主题分类阅读。</span><span class="home-feature-link">浏览文档与笔记 →</span></a>
-</div>
 
 ## 欢迎
 
-欢迎来到我的个人网站。这里会逐步整理我的学习经历、项目，以及课程、学习和工作中的记录。
+我是郭彦禛，目前在中国科学技术大学（[USTC](https://www.ustc.edu.cn/)）学习物理。这个网站用来整理我的笔记与项目记录。

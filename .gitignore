@@ -1,6 +1,11 @@
 node_modules
 .vscode
 .env
+.env.*
+!.env.example
+/.omp/
+.omp-translate-backup-*.tmp
+.omp-translate-conflict-*.tmp
 .playwright-cli/
 /docs/.vitepress/.temp/
 /docs/.vitepress/dist/

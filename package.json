@@ -4,13 +4,19 @@
     "markdown-it-mathjax3": "4.3.2",
     "mermaid": "11.17.2",
     "vitepress": "^2.0.0-alpha.20",
-    "vue": "^3.5.45"
+    "vue": "^3.5.45",
+    "yaml": "2.9.1"
   },
   "scripts": {
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs",
-    "check:bilingual": "node scripts/check-bilingual.mjs"
+    "check:bilingual": "node scripts/check-bilingual.mjs",
+    "translate:docs": "node scripts/translate-docs.mjs",
+    "translate:docs:write": "node scripts/translate-docs.mjs --write",
+    "translate:docs:force": "node scripts/translate-docs.mjs --write --force",
+    "test:bilingual": "node --test scripts/check-bilingual.test.mjs scripts/document-mapping.test.mjs scripts/markdown-privacy.test.mjs scripts/markdown-protect.test.mjs scripts/markdown-segment.test.mjs scripts/markdown-security.test.mjs scripts/path-safety.test.mjs scripts/mermaid-translate.test.mjs scripts/frontmatter-translate.test.mjs scripts/translate-docs.test.mjs tools/omp-model.test.mjs",
+    "test:tools": "node --test tools/omp-model.test.mjs tools/ai-search.test.mjs"
   },
   "allowScripts": {
     "esbuild@0.27.7": true

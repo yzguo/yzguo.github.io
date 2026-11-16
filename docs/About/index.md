@@ -1,6 +1,6 @@
 # About
 
-I’m Yanzhen Guo, currently studying physics at the University of Science and Technology of China (USTC). This page introduces my education, interests, projects, and contact links.
+I'm Yanzhen Guo, currently studying physics at the University of Science and Technology of China (USTC). Below are my education history, interests, and contact details.
 
 ## Education
 
@@ -13,11 +13,11 @@ I’m Yanzhen Guo, currently studying physics at the University of Science and T
 
 ## Interests
 
-I’m mainly interested in physics, computing, and engineering. I also share ideas and reflections from my learning in the blog.
+My main interests are physics, computing, and engineering. Some of what I learn ends up in the blog.
 
 ## Work and competitions
 
-This section is for work experience, competitions, and related results. I’ll add entries as they are ready to share.
+Work experience and competition results are not listed here yet.
 
 ## Contact
 
