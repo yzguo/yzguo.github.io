@@ -2,9 +2,6 @@
 #
 name: Deploy VitePress site to Pages
 
-      - name: Check English and Chinese docs
-        run: pnpm check:bilingual
-
 on:
   # Runs on pushes targeting the `main` branch. Change this to `master` if you're
   # using the `master` branch as the default branch.
@@ -46,6 +43,9 @@ jobs:
         uses: actions/configure-pages@v6
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Check English and Chinese docs
+        run: pnpm check:bilingual
       - name: Build with VitePress
         run: pnpm docs:build
       - name: Upload artifact
