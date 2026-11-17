@@ -2,7 +2,7 @@ import { defineConfig, type DefaultTheme } from 'vitepress'
 
 export const en_us = defineConfig({
     lang: 'en-US',
-    description: "Yanzhen Guo's personal homepage.",
+    description: "Personal homepage.",
     themeConfig: {
         nav: [
             { text: 'About', link: '/About/', activeMatch: '^/About/' },
@@ -24,7 +24,7 @@ export const en_us = defineConfig({
         langMenuLabel: "Languages",
         returnToTopLabel: "Return to top",
         sidebarMenuLabel: "Menu",
-        darkModeSwitchLabel: "Appearance",
+        darkModeSwitchLabel: "Theme",
         lightModeSwitchTitle: "Switch to light theme",
         darkModeSwitchTitle: "Switch to dark theme"
     }

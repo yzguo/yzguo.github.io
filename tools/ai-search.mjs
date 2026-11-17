@@ -1,19 +1,25 @@
 /**
- * Local, development-only AI search for the VitePress site.
+ * Local-only AI search for the VitePress site.
  *
  * The module has two jobs:
  *
  * 1. Build a small, in-memory retrieval index from the public Markdown pages
  *    under `docs/`, split by language and heading.
  * 2. Serve a same-origin JSON endpoint (`/__ai-search`) from the Vite dev
- *    server. The endpoint validates the HTTP request, retrieves a handful of
- *    public excerpts, and asks the locally configured OMP model to answer
- *    using only those excerpts.
+ *    server when the public AI switch is enabled. The endpoint validates the
+ *    HTTP request, retrieves a handful of public excerpts, and asks the
+ *    independent `tools/ai-model.mjs` adapter (`requestModel`) to answer using
+ *    only those excerpts.
  *
  * Security and privacy rules implemented here:
  *
- * - Only loopback clients and `localhost`, `127.0.0.1`, `[::1]` Host headers
- *   are accepted. This blocks DNS-rebinding and accidental public exposure.
+ * - The service is disabled unless constructed with `enabled: true`. A
+ *   disabled service answers the endpoint with an explicit JSON error and
+ *   never builds the index or calls a model. Production builds never attach
+ *   this service at all.
+ * - When enabled, only loopback clients and `localhost`, `127.0.0.1`, `[::1]`
+ *   Host headers are accepted. This blocks DNS-rebinding and accidental
+ *   public exposure.
  * - The request must be a JSON `POST` with a matching same-origin `Origin`
  *   header. Browsers cannot submit this from another site without a CORS
  *   preflight, which this endpoint never grants.
@@ -31,16 +37,25 @@
  *   error text, stack, URL, configuration, or credentials are echoed or
  *   logged.
  *
- * `tools/omp-model.mjs` is imported lazily, only when a model answer is
- * actually requested. Importing this module (for example while loading the
- * VitePress config during a production build) performs no authentication,
- * no network access, and reads no OMP configuration.
+ * `tools/ai-model.mjs` is imported lazily, only when a model answer is
+ * actually requested. Importing this module (for example in tests) performs
+ * no authentication, no network access, and reads no model configuration.
  */
 
 import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createMarkdownRenderer } from 'vitepress'
+import {
+    assertPrivateModelConfigPlacement,
+    canonicalizeFilePath,
+    fileIdentity,
+    isPrivateResourcePath,
+    isWithinPath,
+    pathKey,
+    resolveFileSystemOps,
+    resolveProtectedResource,
+} from './ai-search-config.mjs'
 import {
     sanitizeMarkdownForModel,
     splitMarkdownDocument,
@@ -51,7 +66,8 @@ export const MAX_BODY_BYTES = 8 * 1024
 export const MAX_QUERY_LENGTH = 200
 export const MAX_MATCHES = 4
 export const MAX_ANSWER_CHARS = 6000
-export const MODEL_TIMEOUT_MS = 60_000
+export const MODEL_TIMEOUT_MS = 300_000
+export const MAX_MODEL_TIMEOUT_MS = 2_147_483_647
 export const MAX_CONCURRENT_MODEL_REQUESTS = 1
 
 /** Canonical language ids used internally. */
@@ -137,6 +153,9 @@ const ERROR_MESSAGES = {
             'The local AI model could not produce an answer. The normal keyword search is still available.',
         busy:
             'The local AI model is busy with another question. Please try again in a moment.',
+        timeout:
+            'The AI model took too long to answer. The normal keyword search is still available.',
+        disabled: 'AI search is disabled on this server.',
         internal_error:
             'The local documentation index could not be read. The normal keyword search is still available.',
         invalid_request: 'The AI search request was invalid.',
@@ -154,6 +173,9 @@ const ERROR_MESSAGES = {
             '本地 AI 模型暂时无法生成回答。原有的关键词搜索仍然可用。',
         busy:
             '本地 AI 模型正在回答另一个问题，请稍后再试。',
+        timeout:
+            'AI 模型响应超时。原有的关键词搜索仍然可用。',
+        disabled: '此服务器已关闭 AI 搜索。',
         internal_error:
             '无法读取本地文档索引。原有的关键词搜索仍然可用。',
         invalid_request: 'AI 搜索请求无效。',
@@ -1018,19 +1040,25 @@ function sanitizeAnswer(value) {
 let defaultRequestModelPromise = null
 
 /**
- * Import the OMP bridge lazily. This helps keep production builds and the
- * bilingual checker completely independent of OMP configuration.
+ * Import the independent model adapter lazily. Importing this module never
+ * reads model configuration or performs network access by itself. The adapter
+ * reads its own local ignored configuration only when a request is made.
  */
 async function defaultRequestModel(args) {
     if (!defaultRequestModelPromise) {
-        defaultRequestModelPromise = import('./omp-model.mjs').then(
-            (module) => {
+        defaultRequestModelPromise = import('./ai-model.mjs')
+            .then((module) => {
                 if (typeof module.requestModel !== 'function') {
                     throw new Error('requestModel export is missing')
                 }
                 return module.requestModel
-            }
-        )
+            })
+            .catch((error) => {
+                // Allow a later request to retry after a transient import
+                // failure instead of caching a rejected promise forever.
+                defaultRequestModelPromise = null
+                throw error
+            })
     }
     const requestModel = await defaultRequestModelPromise
     return requestModel(args)
@@ -1289,10 +1317,326 @@ function sendJson(response, status, payload, extraHeaders = {}) {
     response.end(body)
 }
 
+function normalizeTimeoutMs(value) {
+    return Number.isSafeInteger(value) &&
+        value > 0 &&
+        value <= MAX_MODEL_TIMEOUT_MS
+        ? value
+        : MODEL_TIMEOUT_MS
+}
+
+/**
+ * Resolve the model timeout from the same integer environment variable the
+ * independent adapter uses. Search and adapter therefore agree on the request
+ * bound instead of hard-coding two different defaults.
+ */
+export function resolveModelTimeoutMs(value = process.env.AI_REQUEST_TIMEOUT_MS) {
+    if (typeof value === 'string' && /^\d+$/u.test(value.trim())) {
+        return normalizeTimeoutMs(Number(value.trim()))
+    }
+    return normalizeTimeoutMs(value)
+}
+
+/**
+ * The Vite dev server normally serves any file inside its workspace root,
+ * including `tools/api-key.txt` through `/@fs/`. This guard fails closed for
+ * private model configuration and for symlink escapes out of the directories
+ * the site actually needs (docs, docs/public, node_modules).
+ *
+ * It is intentionally independent of the AI search switch: turning AI search
+ * off must not make the key readable. Vite's own default `server.fs.deny`
+ * list is left untouched; this only adds checks Vite cannot make (real paths,
+ * URL decoding, and the file named by `AI_MODEL_CONFIG`).
+ */
+
+const FS_PREFIX = '/@fs/'
+const ID_PREFIX = '/@id/'
+
+/**
+ * Decode the request path more than once and reject anything that is still
+ * encoded or contains NUL. Repeated decoding prevents `%252f` and similar
+ * encodings from hiding a protected path from a one-pass check.
+ */
+function decodeRequestPathname(rawUrl) {
+    let parsed
+    try {
+        parsed = new URL(rawUrl || '/', 'http://localhost')
+    } catch {
+        return null
+    }
+
+    let pathname = parsed.pathname
+    for (let index = 0; index < 4 && pathname.includes('%'); index++) {
+        try {
+            pathname = decodeURIComponent(pathname)
+        } catch {
+            return null
+        }
+    }
+    if (/%[0-9a-f]{2}/iu.test(pathname) || pathname.includes('\0')) {
+        return null
+    }
+
+    return '/' + pathname.replace(/\\/gu, '/').replace(/^\/+/u, '')
+}
+
+function fsTarget(value) {
+    let target = value
+    if (
+        process.platform === 'win32' &&
+        /^\/[A-Za-z]:[\\/]/u.test(target)
+    ) {
+        target = target.slice(1)
+    }
+    if (!path.isAbsolute(target)) return null
+    return target
+}
+
+/**
+ * Create a connect-style middleware that rejects file-serving requests for
+ * private model configuration, `.env`/private extensions, `.git`, files
+ * outside the allowed roots, and symlinks escaping those roots.
+ *
+ * `allowedRoots` must contain the docs directory, docs/public, and the
+ * repository's node_modules directory (the same values given to
+ * `server.fs.allow`). `AI_MODEL_CONFIG` is resolved relative to `baseDir`
+ * (the process working directory by default), matching tools/ai-model.mjs,
+ * and is rejected when it points inside any served root.
+ */
+export function createFileAccessGuard(options = {}) {
+    const allowedRootValues = options.allowedRoots
+    if (!Array.isArray(allowedRootValues) || allowedRootValues.length === 0) {
+        throw new TypeError('allowedRoots must be a non-empty array')
+    }
+
+    const fsOps = resolveFileSystemOps(options.fs)
+    const baseDirectory = path.resolve(options.baseDir || process.cwd())
+    const allowedRoots = []
+    for (const value of allowedRootValues) {
+        if (typeof value !== 'string' || value.trim() === '') {
+            throw new TypeError('Every allowed root must be a non-empty path')
+        }
+        const lexical = path.resolve(value)
+        let canonical = lexical
+        try {
+            canonical = canonicalizeFilePath(lexical, fsOps)
+        } catch {
+            // A missing allowed root is not a secret leak; keep its lexical
+            // path so startup is not broken before dependencies are installed.
+        }
+        allowedRoots.push({ lexicalKey: pathKey(lexical) })
+        allowedRoots.push({ lexicalKey: pathKey(canonical) })
+    }
+
+    const protectedSpecs = []
+    const apiKeyPath =
+        options.apiKeyPath ??
+        path.join(options.repoRoot || baseDirectory, 'tools', 'api-key.txt')
+    protectedSpecs.push({ value: apiKeyPath, label: 'AI key' })
+
+    let aiModelConfig
+    if (
+        Object.prototype.hasOwnProperty.call(options, 'aiModelConfig')
+    ) {
+        aiModelConfig = options.aiModelConfig
+    } else {
+        aiModelConfig = process.env.AI_MODEL_CONFIG
+    }
+    if (
+        aiModelConfig !== undefined &&
+        aiModelConfig !== null &&
+        aiModelConfig !== ''
+    ) {
+        const configEntry = assertPrivateModelConfigPlacement({
+            aiModelConfig,
+            servedRoots: allowedRootValues,
+            repositoryRoot: options.repoRoot || baseDirectory,
+            baseDirectory,
+            fs: fsOps,
+        })
+        if (configEntry) {
+            protectedSpecs.push({
+                value: aiModelConfig,
+                label: 'Private model configuration',
+            })
+        }
+    }
+
+    for (const value of options.protectedFiles || []) {
+        protectedSpecs.push({ value, label: 'Protected file' })
+    }
+
+    // Validate at startup only; identities are re-read for every request so a
+    // key created or replaced after startup cannot leave a stale cache.
+    const startupEntries = []
+    for (const spec of protectedSpecs) {
+        startupEntries.push(
+            resolveProtectedResource(spec.value, {
+                baseDirectory,
+                fs: fsOps,
+                label: spec.label,
+            })
+        )
+    }
+    const observedIdentities = new Set(
+        startupEntries
+            .map((entry) => entry.identity)
+            .filter((value) => typeof value === 'string')
+    )
+
+    const refreshProtectedEntries = () => {
+        const entries = []
+        try {
+            for (const spec of protectedSpecs) {
+                entries.push(
+                    resolveProtectedResource(spec.value, {
+                        baseDirectory,
+                        fs: fsOps,
+                        label: spec.label,
+                    })
+                )
+            }
+        } catch {
+            // A protected path that cannot be resolved now is an abnormal
+            // condition; deny file access rather than guessing its identity.
+            return null
+        }
+        for (const entry of entries) {
+            if (entry.identity) observedIdentities.add(entry.identity)
+        }
+        return entries
+    }
+
+    const isAllowedTarget = (target, protectedEntries) => {
+        let canonical
+        try {
+            canonical = canonicalizeFilePath(target, fsOps)
+        } catch {
+            return false
+        }
+
+        const lexicalKey = pathKey(target)
+        const canonicalKey = pathKey(canonical)
+        if (
+            isPrivateResourcePath(lexicalKey) ||
+            isPrivateResourcePath(canonicalKey)
+        ) {
+            return false
+        }
+
+        let targetStats = null
+        try {
+            targetStats = fsOps.statSync(canonical)
+        } catch (error) {
+            if (error?.code !== 'ENOENT' && error?.code !== 'ENOTDIR') {
+                return false
+            }
+        }
+        const targetIdentity = fileIdentity(targetStats)
+        if (targetIdentity && observedIdentities.has(targetIdentity)) {
+            return false
+        }
+
+        for (const entry of protectedEntries) {
+            for (const candidate of [lexicalKey, canonicalKey]) {
+                if (
+                    entry.directory
+                        ? isWithinPath(entry.lexicalKey, candidate) ||
+                          isWithinPath(entry.canonicalKey, candidate)
+                        : candidate === entry.lexicalKey ||
+                          candidate === entry.canonicalKey
+                ) {
+                    return false
+                }
+            }
+        }
+
+        return allowedRoots.some((root) =>
+            isWithinPath(root.lexicalKey, canonicalKey)
+        )
+    }
+
+    return function fileAccessGuard(request, response, next) {
+        const pathname = decodeRequestPathname(request.url)
+        if (pathname === null) {
+            sendForbidden(response)
+            return
+        }
+
+        const protectedEntries = refreshProtectedEntries()
+        if (!protectedEntries) {
+            sendForbidden(response)
+            return
+        }
+
+        const targets = []
+
+        if (pathname === '/@fs' || pathname === '/@fs/') {
+            sendForbidden(response)
+            return
+        }
+        if (pathname.startsWith(FS_PREFIX)) {
+            const target = fsTarget(pathname.slice(FS_PREFIX.length))
+            if (!target) {
+                sendForbidden(response)
+                return
+            }
+            targets.push(target)
+        } else if (pathname === '/@id' || pathname === '/@id/') {
+            sendForbidden(response)
+            return
+        } else if (pathname.startsWith(ID_PREFIX)) {
+            let id = pathname.slice(ID_PREFIX.length)
+            if (id.startsWith('@fs/')) id = id.slice('@fs/'.length)
+            const target = fsTarget(id)
+            if (target) {
+                targets.push(target)
+            } else {
+                for (const root of allowedRootViews(allowedRootValues)) {
+                    targets.push(path.resolve(root, id))
+                }
+            }
+        } else {
+            const relative = pathname.slice(1)
+            for (const root of allowedRootViews(allowedRootValues)) {
+                targets.push(path.resolve(root, relative))
+            }
+        }
+
+        if (targets.length === 0) {
+            sendForbidden(response)
+            return
+        }
+        if (!targets.every((target) => isAllowedTarget(target, protectedEntries))) {
+            sendForbidden(response)
+            return
+        }
+        next()
+    }
+}
+
+function allowedRootViews(values) {
+    return values.map((value) => path.resolve(value))
+}
+
+function sendForbidden(response) {
+    const body = Buffer.from('Forbidden', 'utf8')
+    response.statusCode = 403
+    response.setHeader('Content-Type', 'text/plain; charset=utf-8')
+    response.setHeader('Content-Length', String(body.length))
+    response.setHeader('Cache-Control', 'no-store')
+    response.setHeader('X-Content-Type-Options', 'nosniff')
+    response.end(body)
+}
+
 /**
  * Create the search service used by the Vite middleware and by tests.
  * `requestModel` is injectable so the retrieval and HTTP security paths can be
- * tested without OMP, credentials, or network access.
+ * tested without model configuration, credentials, or network access.
+ *
+ * `enabled` defaults to false. The VitePress plugin passes the resolved public
+ * switch explicitly; a disabled service refuses the endpoint without building
+ * an index or calling a model.
  */
 export function createAiSearchService(options = {}) {
     const docsRoot = path.resolve(
@@ -1300,7 +1644,10 @@ export function createAiSearchService(options = {}) {
             fileURLToPath(new URL('../docs/', import.meta.url))
     )
     const requestModel = options.requestModel || defaultRequestModel
-    const timeoutMs = options.timeoutMs || MODEL_TIMEOUT_MS
+    const enabled = options.enabled === true
+    const timeoutMs = options.timeoutMs === undefined
+        ? resolveModelTimeoutMs()
+        : normalizeTimeoutMs(options.timeoutMs)
     const maxBodyBytes = options.maxBodyBytes || MAX_BODY_BYTES
     const maxMatches = options.maxMatches || MAX_MATCHES
     const maxConcurrentModelRequests =
@@ -1332,6 +1679,10 @@ export function createAiSearchService(options = {}) {
 
     async function search(query, lang, runtime = {}) {
         const signal = runtime.signal
+        if (!enabled) {
+            return { status: 'disabled', sources: [] }
+        }
+
         const canonicalLanguage = LANGUAGE_ALIASES.get(
             typeof lang === 'string' ? lang.toLowerCase() : ''
         )
@@ -1368,6 +1719,21 @@ export function createAiSearchService(options = {}) {
 
         const sources = sourcesFromMatches(matches)
         const prompt = buildPrompt(query, matches)
+
+        // The adapter receives both the configured timeout and an abort
+        // signal. The same timeout is enforced here as an outer bound, so a
+        // slow adapter cannot keep the single model slot forever.
+        const modelAbort = new AbortController()
+        let timedOut = false
+        const relayAbort = () => modelAbort.abort()
+        if (signal) {
+            signal.addEventListener('abort', relayAbort, { once: true })
+        }
+        const timeoutHandle = setTimeout(() => {
+            timedOut = true
+            modelAbort.abort()
+        }, timeoutMs)
+
         let rawAnswer
         activeModelRequests += 1
         try {
@@ -1375,16 +1741,23 @@ export function createAiSearchService(options = {}) {
                 system: SYSTEM_PROMPTS[canonicalLanguage],
                 prompt,
                 timeoutMs,
-                signal,
+                signal: modelAbort.signal,
             })
-        } catch {
+        } catch (error) {
             // Deliberately discard the original error: it may contain a URL,
             // provider configuration, or model response. Never log or return it.
-            return {
-                status: signal?.aborted ? 'aborted' : 'model_error',
-                sources: [],
+            if (signal?.aborted) {
+                return { status: 'aborted', sources: [] }
             }
+            if (timedOut || error?.code === 'MODEL_TIMEOUT') {
+                return { status: 'timeout', sources: [] }
+            }
+            return { status: 'model_error', sources: [] }
         } finally {
+            clearTimeout(timeoutHandle)
+            if (signal) {
+                signal.removeEventListener('abort', relayAbort)
+            }
             activeModelRequests -= 1
         }
 
@@ -1413,9 +1786,19 @@ export function createAiSearchService(options = {}) {
             return
         }
 
-        // The model is a child process. If the browser tab closes or the
-        // request is aborted, cancel it and let the search's `finally` release
-        // the single model slot.
+        // The switch is resolved at dev-server start. Refuse the endpoint
+        // explicitly without touching the index, the request body, or a model.
+        if (!enabled) {
+            sendJson(response, 404, {
+                ok: false,
+                code: 'ai_disabled',
+                message: messageFor('en', 'disabled'),
+            })
+            return
+        }
+
+        // If the browser tab closes or the request is aborted, cancel the
+        // model request and let the search's `finally` release the slot.
         const abortController = new AbortController()
         const abortRequest = () => {
             if (!abortController.signal.aborted) abortController.abort()
@@ -1531,6 +1914,15 @@ export function createAiSearchService(options = {}) {
                 return
             }
 
+            if (result.status === 'timeout') {
+                sendJson(response, 504, {
+                    ok: false,
+                    code: 'timeout',
+                    message: messageFor(responseLanguage, 'timeout'),
+                })
+                return
+            }
+
             sendJson(response, 502, {
                 ok: false,
                 code: 'model_error',
@@ -1589,6 +1981,8 @@ export function createAiSearchService(options = {}) {
 
     return {
         docsRoot,
+        enabled,
+        timeoutMs,
         handle,
         middleware,
         search,
@@ -1602,14 +1996,50 @@ export function createAiSearchService(options = {}) {
  * listener is created and no public interface is bound.
  */
 export function attachLocalAiSearch(server, options = {}) {
+    const docsRoot = path.resolve(
+        options.docsRoot || server.config.root
+    )
     const service = createAiSearchService({
-        docsRoot: options.docsRoot || server.config.root,
         ...options,
+        docsRoot,
     })
 
+    const repoRoot = path.resolve(
+        options.repoRoot || path.join(docsRoot, '..')
+    )
+    const publicDir = path.resolve(
+        options.publicDir ||
+            server.config.publicDir ||
+            path.join(docsRoot, 'public')
+    )
+    const allowedRoots = options.allowedRoots || [
+        docsRoot,
+        publicDir,
+        path.join(repoRoot, 'node_modules'),
+    ]
+    const fileGuard = createFileAccessGuard({
+        allowedRoots,
+        baseDir: options.baseDir || process.cwd(),
+        repoRoot,
+        apiKeyPath:
+            options.apiKeyPath ||
+            path.join(repoRoot, 'tools', 'api-key.txt'),
+        ...(Object.prototype.hasOwnProperty.call(options, 'aiModelConfig')
+            ? { aiModelConfig: options.aiModelConfig }
+            : {}),
+        protectedFiles: options.protectedFiles,
+    })
+
+    // Install the guard before the AI endpoint and before Vite's internal
+    // static/raw-fs middlewares. It stays active when AI search is disabled.
+    server.middlewares.use(fileGuard)
     server.middlewares.use(service.middleware)
 
-    if (server.watcher && typeof server.watcher.on === 'function') {
+    if (
+        service.enabled &&
+        server.watcher &&
+        typeof server.watcher.on === 'function'
+    ) {
         const docsRoot = path.resolve(service.docsRoot)
         const onFileChange = (_event, file) => {
             if (typeof file !== 'string' || !file.toLowerCase().endsWith('.md')) {

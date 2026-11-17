@@ -4,8 +4,8 @@
  * codepoint in the Noto Emoji cmap (plus ZWJ/VS16/modifier and keycap bases),
  * pinned to the default weight to keep the file small.
  * The ASCII keycap bases (#, * and digits) are present so sequences such as
- * 1️⃣ shape with this local font; ordinary digits are still rendered by Latin
- * Modern, which precedes Noto Emoji in the site font stack. Copyright,
+ * 1️⃣ shape with this local font; ordinary digits are still rendered by the
+ * Noto Sans SC Latin faces, which precede Noto Emoji in the site font stack. Copyright,
  * registered and trademark signs and CJK symbols remain absent from the
  * unicode-range, so text cannot trigger an emoji download on pages without
  * emoji.

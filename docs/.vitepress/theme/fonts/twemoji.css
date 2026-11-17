@@ -3,7 +3,7 @@
  * sequences or keycap sequences: it looks for a color emoji face instead. This face
  * is therefore placed after Noto Emoji as the color fallback for those sequences,
  * while default-presentation emoji still use Noto Emoji. Ordinary text (Latin,
- * digits, plain copyright) is rendered by Latin Modern first.
+ * digits, plain copyright) is rendered by Noto Sans SC first.
  * unicode-range is exactly the Twemoji font cmap (1,418 codepoints), so this face
  * cannot be downloaded for text symbols such as stars or check marks. */
 

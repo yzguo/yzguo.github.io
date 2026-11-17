@@ -5,7 +5,6 @@ All fonts below are served from this origin under /fonts/. No third-party font
 CDN or system font is required for the site's typography. Full license texts
 are stored next to the font files.
 
-Latin Modern Roman 10 (regular, italic, bold, bold-italic)
 Latin Modern Mono 10 (regular, italic)
   Version: Latin Modern 2.005 (2021-03-21)
   License: GUST Font License 1.0 (see latin-modern/GUST-FONT-LICENSE.txt and
@@ -13,6 +12,9 @@ Latin Modern Mono 10 (regular, italic)
   Upstream: https://www.gust.org.pl/projects/e-foundry/latin-modern/
   Source files: https://mirrors.ctan.org/fonts/lm/fonts/opentype/public/lm/
   Modification: converted from OpenType (CFF) to WOFF2; outlines unchanged.
+  Scope: code and preformatted text only. The Latin Modern Roman faces were
+  removed when body text switched to the local Noto Sans SC faces, so those
+  WOFF2 files and @font-face rules no longer exist.
 
 Noto Sans SC
   Version: Google Fonts v41 variable font (weights 100-900)
@@ -29,8 +31,16 @@ Noto Sans SC
   the build except slices 089/095, whose entire ranges are covered by the tiers.
   Their ranges are narrowed to remove tier characters, so a tier character never
   triggers a fallback download. No previously supported character was dropped.
-  Modification: unicode-range declarations exclude Latin letter ranges so
-  English/Latin text is rendered by Latin Modern Roman, not by this CJK face.
+  Modification: two CSS families are built from these same local slices.
+  'Noto Sans SC Latin' is first in the site stack and declares the real Latin
+  text ranges present in slices 101 (Basic Latin, Latin-1, punctuation), 100
+  (Latin Extended-A/B and pinyin tone letters) and 099 (Vietnamese). It also
+  contains punctuation, digits and ©/®/™, but deliberately omits emoji
+  pictographs, ZWJ and PUA so those keep the icon/emoji faces that follow.
+  'Noto Sans SC' carries CJK, kana, Hangul, fullwidth forms and the symbol
+  tiers; its Latin-letter ranges are still excluded, so Latin text always
+  resolves to the Latin family. Both families are self-hosted; no CDN or
+  system font is involved.
   Subsets were generated from the variable font and retain the 100-900 axis.
 
 Noto Emoji
@@ -45,8 +55,8 @@ Noto Emoji
   Scope: default-presentation emoji (😀, flags, ZWJ sequences) use this monochrome
   face. Chromium does not use it for VS16 emoji presentation or keycap sequences;
   the local Twemoji color face below is the fallback for those. ASCII keycap bases
-  are present in the cmap, but ordinary digits use Latin Modern, which precedes
-  this family in the stack.
+  are present in the cmap, but ordinary digits use the Noto Sans SC Latin faces,
+  which precede this family in the stack.
 
 Twemoji Mozilla
   Version: 0.7.0, COLR/CPAL color font
@@ -58,7 +68,7 @@ Twemoji Mozilla
   presentation and keycap sequences and otherwise selects the system color emoji
   font. Twemoji is placed after Noto Emoji in the stack, so default emoji remain
   monochrome Noto while ©️/❤️/1️⃣/#️⃣ use this local color face. Plain © and
-  digits are rendered by Latin Modern first.
+  digits are rendered by the Noto Sans SC Latin faces first.
 
 Symbols Nerd Font
   Version: Nerd Fonts 3.4.0

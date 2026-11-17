@@ -5,20 +5,35 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { Readable } from 'node:stream'
+import { fileURLToPath } from 'node:url'
 
 import {
     AI_SEARCH_PATH,
     MAX_BODY_BYTES,
     MODEL_TIMEOUT_MS,
+    attachLocalAiSearch,
     buildDocsIndex,
     createAiSearchService,
+    createFileAccessGuard,
     parseAllowedHost,
     parseMarkdownPage,
+    resolveModelTimeoutMs,
     sanitizeSourcePath,
     searchDocs,
     stripScriptStyleBlocks,
     tokenize,
 } from './ai-search.mjs'
+import {
+    AI_SEARCH_CONFIG_PATH,
+    DEFAULT_AI_SEARCH_CONFIG,
+    DEFAULT_FILE_SYSTEM_OPS,
+    assertPrivateModelConfigPlacement,
+    parseAiSearchConfig,
+    pathKey,
+    readAiSearchConfig,
+    resolveAiSearchEnabled,
+    scanPublishableResources,
+} from './ai-search-config.mjs'
 
 let docsRoot
 
@@ -330,6 +345,15 @@ function createModel(answer = 'A useful answer') {
     return { calls, requestModel }
 }
 
+/** Most retrieval tests exercise the enabled path explicitly. */
+function createService(options = {}) {
+    return createAiSearchService({
+        docsRoot,
+        enabled: true,
+        ...options,
+    })
+}
+
 class MockResponse extends EventEmitter {
     constructor() {
         super()
@@ -429,6 +453,26 @@ async function callService(service, options = {}) {
 
 function queryBody(query, lang, extra = {}) {
     return JSON.stringify({ query, lang, ...extra })
+}
+
+function fsUrl(filePath) {
+    const normalized = path.resolve(filePath).replace(/\\/gu, '/')
+    return '/@fs/' + encodeURI(normalized)
+}
+
+async function fileAccess(guard, url) {
+    const request = { method: 'GET', url }
+    const response = new MockResponse()
+    let nextCalled = false
+    guard(request, response, () => {
+        nextCalled = true
+    })
+    return {
+        nextCalled,
+        status: response.statusCode,
+        body: response.body,
+        headers: response.headers,
+    }
 }
 
 test('removes script/style blocks completely and fails closed when unclosed', () => {
@@ -774,7 +818,7 @@ test('retrieves relevant sections without mixing languages', async () => {
 
 test('does not call the model when retrieval has no results', async () => {
     const model = createModel('should never be called')
-    const service = createAiSearchService({
+    const service = createService({
         docsRoot,
         requestModel: model.requestModel,
     })
@@ -794,7 +838,7 @@ test('does not call the model when retrieval has no results', async () => {
 
 test('answers from public retrieval context and returns safe sources', async () => {
     const model = createModel('The period depends on length and gravity.')
-    const service = createAiSearchService({
+    const service = createService({
         docsRoot,
         requestModel: model.requestModel,
     })
@@ -828,7 +872,7 @@ test('answers from public retrieval context and returns safe sources', async () 
 
 test('Chinese retrieval uses Chinese context and sources', async () => {
     const model = createModel('周期由摆长和重力决定。')
-    const service = createAiSearchService({
+    const service = createService({
         docsRoot,
         requestModel: model.requestModel,
     })
@@ -856,7 +900,7 @@ test('distinguishes model failure from no results and redacts errors', async () 
             `provider failed at https://example.invalid config ${secret}`
         )
     })
-    const service = createAiSearchService({
+    const service = createService({
         docsRoot,
         requestModel: model.requestModel,
     })
@@ -875,7 +919,7 @@ test('distinguishes model failure from no results and redacts errors', async () 
     assert.equal(model.calls.length, 1)
 
     const emptyModel = createModel('   ')
-    const emptyService = createAiSearchService({
+    const emptyService = createService({
         docsRoot,
         requestModel: emptyModel.requestModel,
     })
@@ -888,7 +932,7 @@ test('distinguishes model failure from no results and redacts errors', async () 
 
 test('never sends private blocks or comments to the model', async () => {
     const model = createModel('Visible answer.')
-    const service = createAiSearchService({
+    const service = createService({
         docsRoot,
         requestModel: model.requestModel,
     })
@@ -963,7 +1007,7 @@ test('limits concurrent model requests and returns an explicit busy response', a
         return 'second answer'
     }
 
-    const service = createAiSearchService({
+    const service = createService({
         docsRoot,
         requestModel,
         maxConcurrentModelRequests: 1,
@@ -1021,7 +1065,7 @@ test('aborts the model request and releases the slot when the client disconnects
         })
     }
 
-    const service = createAiSearchService({
+    const service = createService({
         docsRoot,
         requestModel,
         maxConcurrentModelRequests: 1,
@@ -1049,7 +1093,7 @@ test('aborts the model request and releases the slot when the client disconnects
 
 test('rejects cross-site, wrong-origin, and DNS-rebinding requests', async () => {
     const model = createModel('must not run')
-    const service = createAiSearchService({
+    const service = createService({
         docsRoot,
         requestModel: model.requestModel,
     })
@@ -1100,7 +1144,7 @@ test('rejects cross-site, wrong-origin, and DNS-rebinding requests', async () =>
 
 test('accepts only loopback clients', async () => {
     const model = createModel('loopback answer')
-    const service = createAiSearchService({
+    const service = createService({
         docsRoot,
         requestModel: model.requestModel,
     })
@@ -1127,7 +1171,7 @@ test('accepts only loopback clients', async () => {
 
 test('validates method, content type, body size, encoding, and schema', async () => {
     const model = createModel('valid')
-    const service = createAiSearchService({
+    const service = createService({
         docsRoot,
         requestModel: model.requestModel,
     })
@@ -1272,6 +1316,896 @@ test('validates Host headers and source paths', () => {
     ]) {
         assert.equal(sanitizeSourcePath(pathname), null)
     }
+})
+
+test('refuses the AI endpoint without touching a model when the switch is off', async () => {
+    let calls = 0
+    const service = createAiSearchService({
+        docsRoot: path.join(docsRoot, 'missing-docs-root'),
+        enabled: false,
+        requestModel: async () => {
+            calls += 1
+            return 'should never be called'
+        },
+    })
+
+    assert.equal(service.enabled, false)
+    const direct = await service.search('pendulum period', 'en')
+    assert.equal(direct.status, 'disabled')
+    assert.deepEqual(direct.sources, [])
+
+    const response = await callService(service, {
+        body: queryBody('pendulum period', 'en'),
+    })
+    assert.equal(response.status, 404)
+    assert.equal(response.json.ok, false)
+    assert.equal(response.json.code, 'ai_disabled')
+    assert.equal(calls, 0)
+    assert.doesNotMatch(
+        response.rawBody,
+        /pendulum|private|api[_-]?key|baseUrl|secret/i
+    )
+})
+
+test('attaches a disabled endpoint and file guard without watching docs', async () => {
+    const watcherEvents = []
+    const handlers = []
+    const fakeKey = path.join(docsRoot, 'fake-api-key.txt')
+    await writeFile(fakeKey, 'FAKE_KEY_SENTINEL', 'utf8')
+    const server = {
+        config: { root: docsRoot },
+        middlewares: {
+            use(handler) {
+                handlers.push(handler)
+            },
+        },
+        watcher: {
+            on() {
+                watcherEvents.push('on')
+            },
+            off() {},
+        },
+    }
+
+    const service = attachLocalAiSearch(server, {
+        enabled: false,
+        aiModelConfig: null,
+        repoRoot: docsRoot,
+        apiKeyPath: fakeKey,
+    })
+    assert.equal(service.enabled, false)
+    assert.equal(handlers.length, 2)
+    assert.equal(handlers[0].name, 'fileAccessGuard')
+    assert.equal(handlers[1], service.middleware)
+    assert.deepEqual(watcherEvents, [])
+
+    const guarded = await fileAccess(handlers[0], fsUrl(fakeKey))
+    assert.equal(guarded.nextCalled, false)
+    assert.equal(guarded.status, 403)
+    assert.equal(guarded.body, 'Forbidden')
+})
+
+test('file access guard blocks private files, encodings, and virtual symlink escapes', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'ai-file-guard-'))
+    try {
+        const repoRoot = path.join(root, 'repo')
+        const docs = path.join(repoRoot, 'docs')
+        const publicDir = path.join(docs, 'public')
+        const nodeModules = path.join(repoRoot, 'node_modules')
+        const tools = path.join(repoRoot, 'tools')
+        const privateDir = path.join(root, 'private')
+        await Promise.all([
+            mkdir(docs, { recursive: true }),
+            mkdir(publicDir, { recursive: true }),
+            mkdir(nodeModules, { recursive: true }),
+            mkdir(tools, { recursive: true }),
+            mkdir(privateDir, { recursive: true }),
+        ])
+
+        const apiKey = path.join(tools, 'api-key.txt')
+        const modelConfig = path.join(privateDir, 'model config.json')
+        const publicFile = path.join(publicDir, 'ok.txt')
+        const docFile = path.join(docs, 'page.md')
+        const dependencyFile = path.join(nodeModules, 'dep.js')
+        const outsideFile = path.join(repoRoot, 'README.md')
+        const leakLink = path.join(publicDir, 'leak.txt')
+        const hardLink = path.join(publicDir, 'hardlink.txt')
+        await Promise.all([
+            writeFile(apiKey, 'FAKE_KEY_SENTINEL', 'utf8'),
+            writeFile(modelConfig, 'FAKE_CONFIG_SENTINEL', 'utf8'),
+            writeFile(publicFile, 'public', 'utf8'),
+            writeFile(docFile, '# page', 'utf8'),
+            writeFile(dependencyFile, 'export default 1', 'utf8'),
+            writeFile(outsideFile, 'outside', 'utf8'),
+            writeFile(leakLink, 'pretend symlink', 'utf8'),
+            writeFile(hardLink, 'pretend hardlink', 'utf8'),
+        ])
+
+        // Inject symlink/junction semantics without requiring OS privileges.
+        const keyStats = DEFAULT_FILE_SYSTEM_OPS.statSync(apiKey)
+        const fakeFs = {
+            ...DEFAULT_FILE_SYSTEM_OPS,
+            realpathSync(value) {
+                if (pathKey(value) === pathKey(leakLink)) return apiKey
+                return DEFAULT_FILE_SYSTEM_OPS.realpathSync(value)
+            },
+            statSync(value) {
+                if (pathKey(value) === pathKey(leakLink)) {
+                    return { isDirectory: () => false }
+                }
+                if (pathKey(value) === pathKey(hardLink)) {
+                    return {
+                        dev: keyStats.dev,
+                        ino: keyStats.ino,
+                        isDirectory: () => false,
+                        isFile: () => true,
+                    }
+                }
+                return DEFAULT_FILE_SYSTEM_OPS.statSync(value)
+            },
+            lstatSync(value) {
+                if (pathKey(value) === pathKey(leakLink)) {
+                    return { isSymbolicLink: () => true }
+                }
+                return DEFAULT_FILE_SYSTEM_OPS.lstatSync(value)
+            },
+        }
+
+        const guard = createFileAccessGuard({
+            allowedRoots: [docs, publicDir, nodeModules],
+            repoRoot,
+            apiKeyPath: apiKey,
+            aiModelConfig: modelConfig,
+            baseDir: root,
+            fs: fakeFs,
+        })
+
+        for (const file of [docFile, publicFile, dependencyFile]) {
+            const result = await fileAccess(guard, fsUrl(file))
+            assert.equal(result.nextCalled, true)
+            assert.equal(result.status, 200)
+            assert.equal(result.body, '')
+        }
+        assert.equal((await fileAccess(guard, '/page.md')).nextCalled, true)
+        assert.equal((await fileAccess(guard, '/ok.txt')).nextCalled, true)
+
+        const previousConfig = process.env.AI_MODEL_CONFIG
+        try {
+            process.env.AI_MODEL_CONFIG = modelConfig
+            const envGuard = createFileAccessGuard({
+                allowedRoots: [docs, publicDir, nodeModules],
+                repoRoot,
+                apiKeyPath: apiKey,
+                baseDir: root,
+            })
+            const envResult = await fileAccess(envGuard, fsUrl(modelConfig))
+            assert.equal(envResult.nextCalled, false)
+            assert.equal(envResult.status, 403)
+        } finally {
+            if (previousConfig === undefined) {
+                delete process.env.AI_MODEL_CONFIG
+            } else {
+                process.env.AI_MODEL_CONFIG = previousConfig
+            }
+        }
+
+        const target = path.resolve(apiKey).replace(/\\/gu, '/')
+        const encodedTarget = encodeURIComponent(target)
+        const blocked = [
+            fsUrl(apiKey),
+            fsUrl(apiKey) + '?raw',
+            fsUrl(modelConfig),
+            fsUrl(outsideFile),
+            fsUrl(leakLink),
+            '/leak.txt',
+            fsUrl(hardLink),
+            '/hardlink.txt',
+            '/@fs/' + encodedTarget,
+            '/@fs/' + encodeURIComponent(encodedTarget),
+            '/' + encodeURIComponent('@fs/' + target),
+            '/.env',
+            '/.env.local',
+            '/.env.',
+            '/api-key.txt.',
+            '/.git/config',
+            '/.git./config',
+            '/license.key',
+            '/bundle.secret.json',
+            '/bundle.private.json',
+            '/bundle.local.json',
+            '/..%2f..%2fREADME.md',
+            '/%00',
+            '/@fs/%E0%A4%A',
+        ]
+
+        for (const url of blocked) {
+            const result = await fileAccess(guard, url)
+            assert.equal(result.nextCalled, false, url)
+            assert.equal(result.status, 403, url)
+            assert.equal(result.body, 'Forbidden')
+            assert.doesNotMatch(
+                result.body,
+                /FAKE_KEY_SENTINEL|FAKE_CONFIG_SENTINEL|api-key|model-config|[A-Z]:\\/i
+            )
+        }
+
+        assert.throws(
+            () =>
+                createFileAccessGuard({
+                    allowedRoots: [docs, publicDir, nodeModules],
+                    repoRoot,
+                    apiKeyPath: apiKey,
+                    aiModelConfig: path.join(docs, 'inside.json'),
+                    baseDir: root,
+                    fs: fakeFs,
+                }),
+            /must not be inside a served or publishable path/
+        )
+
+        const configLink = path.join(root, 'config-link.json')
+        await writeFile(configLink, 'pretend config link', 'utf8')
+        const configLinkFs = {
+            ...fakeFs,
+            realpathSync(value) {
+                if (pathKey(value) === pathKey(configLink)) {
+                    return path.join(publicDir, 'leaked.json')
+                }
+                return fakeFs.realpathSync(value)
+            },
+        }
+        assert.throws(
+            () =>
+                createFileAccessGuard({
+                    allowedRoots: [docs, publicDir, nodeModules],
+                    repoRoot,
+                    apiKeyPath: apiKey,
+                    aiModelConfig: configLink,
+                    baseDir: root,
+                    fs: configLinkFs,
+                }),
+            /must not be inside a served or publishable path/
+        )
+
+        assert.throws(
+            () =>
+                createFileAccessGuard({
+                    allowedRoots: [docs],
+                    repoRoot,
+                    apiKeyPath: apiKey,
+                    aiModelConfig: 'bad\0path',
+                    fs: fakeFs,
+                }),
+            /cannot be resolved safely/
+        )
+    } finally {
+        await rm(root, { recursive: true, force: true })
+    }
+})
+
+test('file access guard refreshes protected identities per request', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'ai-identity-refresh-'))
+    try {
+        const repoRoot = path.join(root, 'repo')
+        const docs = path.join(repoRoot, 'docs')
+        const publicDir = path.join(docs, 'public')
+        const nodeModules = path.join(repoRoot, 'node_modules')
+        const tools = path.join(repoRoot, 'tools')
+        await Promise.all([
+            mkdir(publicDir, { recursive: true }),
+            mkdir(nodeModules, { recursive: true }),
+            mkdir(tools, { recursive: true }),
+        ])
+
+        const key = path.join(tools, 'api-key.txt')
+        const publicFile = path.join(publicDir, 'ok.txt')
+        const firstLink = path.join(publicDir, 'hard-created.txt')
+        const secondLink = path.join(publicDir, 'hard-replaced.txt')
+        await Promise.all([
+            writeFile(publicFile, 'public', 'utf8'),
+            writeFile(firstLink, 'pretend hardlink', 'utf8'),
+            writeFile(secondLink, 'pretend hardlink', 'utf8'),
+        ])
+
+        let keyExists = false
+        let keyError = null
+        let keyIdentity = { dev: 7, ino: 100 }
+        const targetIdentities = new Map([
+            [pathKey(firstLink), null],
+            [pathKey(secondLink), null],
+        ])
+
+        const fakeFs = {
+            ...DEFAULT_FILE_SYSTEM_OPS,
+            realpathSync(value) {
+                if (pathKey(value) === pathKey(key) && !keyExists) {
+                    throw Object.assign(new Error('missing'), {
+                        code: 'ENOENT',
+                    })
+                }
+                return DEFAULT_FILE_SYSTEM_OPS.realpathSync(value)
+            },
+            statSync(value) {
+                if (pathKey(value) === pathKey(key)) {
+                    if (keyError) {
+                        throw Object.assign(new Error('denied'), {
+                            code: keyError,
+                        })
+                    }
+                    if (!keyExists) {
+                        throw Object.assign(new Error('missing'), {
+                            code: 'ENOENT',
+                        })
+                    }
+                    return {
+                        dev: keyIdentity.dev,
+                        ino: keyIdentity.ino,
+                        isDirectory: () => false,
+                        isFile: () => true,
+                    }
+                }
+                const identity = targetIdentities.get(pathKey(value))
+                if (identity) {
+                    return {
+                        dev: identity.dev,
+                        ino: identity.ino,
+                        isDirectory: () => false,
+                        isFile: () => true,
+                    }
+                }
+                return DEFAULT_FILE_SYSTEM_OPS.statSync(value)
+            },
+        }
+
+        const guard = createFileAccessGuard({
+            allowedRoots: [docs, publicDir, nodeModules],
+            repoRoot,
+            apiKeyPath: key,
+            aiModelConfig: null,
+            baseDir: root,
+            fs: fakeFs,
+        })
+
+        // No key yet: ordinary static files still work.
+        assert.equal((await fileAccess(guard, '/ok.txt')).nextCalled, true)
+
+        // Key created after startup; a hardlink gets its current identity.
+        keyExists = true
+        targetIdentities.set(pathKey(firstLink), { dev: 7, ino: 100 })
+        const created = await fileAccess(guard, fsUrl(firstLink))
+        assert.equal(created.nextCalled, false)
+        assert.equal(created.status, 403)
+
+        // Key replaced with a new inode; a new hardlink is still rejected.
+        keyIdentity = { dev: 7, ino: 200 }
+        targetIdentities.set(pathKey(secondLink), { dev: 7, ino: 200 })
+        const replaced = await fileAccess(guard, fsUrl(secondLink))
+        assert.equal(replaced.nextCalled, false)
+        assert.equal(replaced.status, 403)
+
+        // The old identity remains blocked as well.
+        const old = await fileAccess(guard, fsUrl(firstLink))
+        assert.equal(old.nextCalled, false)
+        assert.equal(old.status, 403)
+
+        // Permission/stat failure during refresh fails closed for file access.
+        keyError = 'EACCES'
+        const denied = await fileAccess(guard, '/ok.txt')
+        assert.equal(denied.nextCalled, false)
+        assert.equal(denied.status, 403)
+
+        keyError = null
+        assert.equal((await fileAccess(guard, '/ok.txt')).nextCalled, true)
+    } finally {
+        await rm(root, { recursive: true, force: true })
+    }
+})
+
+test('publish scan rejects private files and virtual symlink escapes', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'ai-publish-scan-'))
+    try {
+        const repoRoot = path.join(root, 'repo')
+        const docs = path.join(repoRoot, 'docs')
+        const publicDir = path.join(docs, 'public')
+        const tools = path.join(repoRoot, 'tools')
+        const privateDir = path.join(root, 'private')
+        await Promise.all([
+            mkdir(publicDir, { recursive: true }),
+            mkdir(tools, { recursive: true }),
+            mkdir(privateDir, { recursive: true }),
+        ])
+
+        const apiKey = path.join(tools, 'api-key.txt')
+        const modelConfig = path.join(privateDir, 'model config.json')
+        await Promise.all([
+            writeFile(path.join(docs, 'index.md'), '# Home', 'utf8'),
+            writeFile(path.join(publicDir, 'ok.css'), 'body{}', 'utf8'),
+            writeFile(apiKey, 'FAKE_KEY_SENTINEL', 'utf8'),
+            writeFile(modelConfig, 'FAKE_CONFIG_SENTINEL', 'utf8'),
+        ])
+
+        const base = {
+            docsRoot: docs,
+            publicDir,
+            apiKeyPath: apiKey,
+            aiModelConfig: modelConfig,
+            repositoryRoot: repoRoot,
+            baseDirectory: root,
+        }
+        scanPublishableResources(base)
+
+        for (const name of [
+            '.env',
+            'leaked.key',
+            'api-key.txt',
+            'bundle.secret.json',
+            'bundle.private.json',
+            'bundle.local.json',
+        ]) {
+            const file = path.join(publicDir, name)
+            await writeFile(file, 'FAKE_PRIVATE_SENTINEL', 'utf8')
+            assert.throws(
+                () => scanPublishableResources(base),
+                /Refusing to publish private configuration or symbolic links/
+            )
+            await rm(file, { force: true })
+        }
+
+        const leak = path.join(publicDir, 'leak.txt')
+        await writeFile(leak, 'pretend symlink', 'utf8')
+        const fakeFs = {
+            ...DEFAULT_FILE_SYSTEM_OPS,
+            lstatSync(value) {
+                if (pathKey(value) === pathKey(leak)) {
+                    return {
+                        isSymbolicLink: () => true,
+                        isDirectory: () => false,
+                        isFile: () => false,
+                    }
+                }
+                return DEFAULT_FILE_SYSTEM_OPS.lstatSync(value)
+            },
+            realpathSync(value) {
+                if (pathKey(value) === pathKey(leak)) return apiKey
+                return DEFAULT_FILE_SYSTEM_OPS.realpathSync(value)
+            },
+        }
+
+        assert.throws(
+            () => scanPublishableResources({ ...base, fs: fakeFs }),
+            (error) => {
+                assert.doesNotMatch(
+                    error.message,
+                    /FAKE_KEY_SENTINEL|FAKE_CONFIG_SENTINEL|api-key|[A-Z]:\\/i
+                )
+                assert.match(
+                    error.message,
+                    /Refusing to publish private configuration or symbolic links/
+                )
+                return true
+            }
+        )
+
+        const hardlinkFile = path.join(publicDir, 'hardlink.txt')
+        await writeFile(hardlinkFile, 'pretend hardlink', 'utf8')
+        const keyStats = DEFAULT_FILE_SYSTEM_OPS.statSync(apiKey)
+        const identityFs = {
+            ...DEFAULT_FILE_SYSTEM_OPS,
+            statSync(value) {
+                if (pathKey(value) === pathKey(hardlinkFile)) {
+                    return {
+                        dev: keyStats.dev,
+                        ino: keyStats.ino,
+                        isDirectory: () => false,
+                        isFile: () => true,
+                    }
+                }
+                return DEFAULT_FILE_SYSTEM_OPS.statSync(value)
+            },
+        }
+        assert.throws(
+            () => scanPublishableResources({ ...base, fs: identityFs }),
+            /Refusing to publish private configuration or symbolic links/
+        )
+
+        const insidePublic = path.join(publicDir, 'private.json')
+        await writeFile(insidePublic, 'FAKE_CONFIG_SENTINEL', 'utf8')
+        assert.throws(
+            () =>
+                scanPublishableResources({
+                    ...base,
+                    aiModelConfig: insidePublic,
+                }),
+            /must not be inside a served or publishable path/
+        )
+
+        const configLink = path.join(root, 'config-link.json')
+        await writeFile(configLink, 'pretend config link', 'utf8')
+        const configLinkFs = {
+            ...DEFAULT_FILE_SYSTEM_OPS,
+            realpathSync(value) {
+                if (pathKey(value) === pathKey(configLink)) {
+                    return insidePublic
+                }
+                return DEFAULT_FILE_SYSTEM_OPS.realpathSync(value)
+            },
+        }
+        assert.throws(
+            () =>
+                scanPublishableResources({
+                    ...base,
+                    aiModelConfig: configLink,
+                    fs: configLinkFs,
+                }),
+            /must not be inside a served or publishable path/
+        )
+
+        const cacheDir = path.join(docs, '.vitepress', 'cache')
+        await mkdir(cacheDir, { recursive: true })
+        const cachedLeak = path.join(cacheDir, 'leak.txt')
+        await writeFile(cachedLeak, 'cache', 'utf8')
+        const cacheFs = {
+            ...DEFAULT_FILE_SYSTEM_OPS,
+            lstatSync(value) {
+                if (pathKey(value) === pathKey(cachedLeak)) {
+                    return {
+                        isSymbolicLink: () => true,
+                        isDirectory: () => false,
+                        isFile: () => false,
+                    }
+                }
+                return DEFAULT_FILE_SYSTEM_OPS.lstatSync(value)
+            },
+        }
+        scanPublishableResources({ ...base, fs: cacheFs })
+    } finally {
+        await rm(root, { recursive: true, force: true })
+    }
+})
+
+test('private model configuration uses only ignored repo paths or outside repo', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'ai-config-placement-'))
+    try {
+        const repoRoot = path.join(root, 'repo')
+        const docs = path.join(repoRoot, 'docs')
+        const publicDir = path.join(docs, 'public')
+        await Promise.all([
+            mkdir(path.join(repoRoot, 'tools'), { recursive: true }),
+            mkdir(publicDir, { recursive: true }),
+        ])
+
+        const common = {
+            servedRoots: [docs, publicDir],
+            repositoryRoot: repoRoot,
+            baseDirectory: root,
+        }
+        const allowed = [
+            path.join(repoRoot, 'tools', 'api-key.txt'),
+            path.join(repoRoot, 'tools', 'api-key.yaml'),
+            path.join(repoRoot, 'tools', 'local.key'),
+            path.join(repoRoot, 'tools', 'local.pem'),
+            path.join(repoRoot, 'tools', 'model.secret.json'),
+            path.join(repoRoot, 'tools', 'model.private.json'),
+            path.join(repoRoot, 'tools', 'model.local.json'),
+            path.join(repoRoot, 'tools', '.env'),
+            path.join(repoRoot, '.env'),
+            path.join(repoRoot, '.env.production'),
+            path.join(root, 'outside.json'),
+        ]
+        for (const aiModelConfig of allowed) {
+            assert.doesNotThrow(
+                () =>
+                    assertPrivateModelConfigPlacement({
+                        ...common,
+                        aiModelConfig,
+                    }),
+                aiModelConfig
+            )
+        }
+
+        const rejected = [
+            path.join(repoRoot, 'config', 'foo.yaml'),
+            path.join(repoRoot, 'tools', 'nested', 'foo.key'),
+            path.join(repoRoot, 'tools', 'foo.json'),
+            path.join(repoRoot, 'tools', 'API-KEY.TXT'),
+            path.join(repoRoot, '.env.example'),
+            path.join(repoRoot, '.ENV'),
+            path.join(repoRoot, 'api-key.txt'),
+            path.join(repoRoot, 'README.md'),
+            path.join(docs, 'model.json'),
+            path.join(publicDir, 'model.json'),
+        ]
+        for (const aiModelConfig of rejected) {
+            assert.throws(
+                () =>
+                    assertPrivateModelConfigPlacement({
+                        ...common,
+                        aiModelConfig,
+                    }),
+                /must not be inside a served or publishable path|must be outside the repository|ignored tools/
+            )
+        }
+
+        const outsideLink = path.join(root, 'outside-link.json')
+        const fakeFs = {
+            ...DEFAULT_FILE_SYSTEM_OPS,
+            realpathSync(value) {
+                if (pathKey(value) === pathKey(outsideLink)) {
+                    return path.join(publicDir, 'leaked.json')
+                }
+                return DEFAULT_FILE_SYSTEM_OPS.realpathSync(value)
+            },
+        }
+        assert.throws(
+            () =>
+                assertPrivateModelConfigPlacement({
+                    ...common,
+                    aiModelConfig: outsideLink,
+                    fs: fakeFs,
+                }),
+            /must not be inside a served or publishable path/
+        )
+
+        const repoLink = path.join(repoRoot, 'tools', 'api-key.txt')
+        const repoLinkFs = {
+            ...DEFAULT_FILE_SYSTEM_OPS,
+            realpathSync(value) {
+                if (pathKey(value) === pathKey(repoLink)) {
+                    return path.join(repoRoot, 'config', 'foo.yaml')
+                }
+                return DEFAULT_FILE_SYSTEM_OPS.realpathSync(value)
+            },
+        }
+        assert.throws(
+            () =>
+                assertPrivateModelConfigPlacement({
+                    ...common,
+                    aiModelConfig: repoLink,
+                    fs: repoLinkFs,
+                }),
+            /must be outside the repository|ignored tools/
+        )
+    } finally {
+        await rm(root, { recursive: true, force: true })
+    }
+})
+
+test('exposes one boolean switch and always disables production builds', async () => {
+    assert.deepEqual(parseAiSearchConfig({ enabled: true }), { enabled: true })
+    assert.deepEqual(parseAiSearchConfig({ enabled: false }), {
+        enabled: false,
+    })
+    assert.equal(resolveAiSearchEnabled('serve', { enabled: true }), true)
+    assert.equal(resolveAiSearchEnabled('serve', { enabled: false }), false)
+    assert.equal(resolveAiSearchEnabled('build', { enabled: true }), false)
+    assert.equal(resolveAiSearchEnabled('build', { enabled: false }), false)
+
+    assert.equal(DEFAULT_AI_SEARCH_CONFIG.enabled, false)
+    assert.equal(MODEL_TIMEOUT_MS, 300_000)
+    assert.equal(resolveModelTimeoutMs('12345'), 12_345)
+    assert.equal(resolveModelTimeoutMs('not-a-number'), MODEL_TIMEOUT_MS)
+    assert.equal(resolveModelTimeoutMs(0), MODEL_TIMEOUT_MS)
+    assert.equal(resolveModelTimeoutMs(null), MODEL_TIMEOUT_MS)
+    assert.deepEqual(
+        readAiSearchConfig(path.join(docsRoot, 'missing-config.json')),
+        DEFAULT_AI_SEARCH_CONFIG
+    )
+    assert.equal(
+        typeof readAiSearchConfig(AI_SEARCH_CONFIG_PATH).enabled,
+        'boolean'
+    )
+
+    for (const invalid of [
+        null,
+        [],
+        'true',
+        { enabled: 'true' },
+        { enabled: true, apiKey: 'sk-test-secret' },
+        { enabled: true, baseUrl: 'https://example.invalid' },
+    ]) {
+        assert.throws(
+            () => parseAiSearchConfig(invalid),
+            (error) => {
+                assert.doesNotMatch(
+                    error.message,
+                    /sk-test-secret|example\.invalid|apiKey|baseUrl/
+                )
+                return true
+            }
+        )
+    }
+
+    const configDir = await mkdtemp(
+        path.join(tmpdir(), 'ai-search-config-')
+    )
+    try {
+        const invalidFile = path.join(configDir, 'invalid.json')
+        await writeFile(
+            invalidFile,
+            '{"enabled":true,"apiKey":"sk-config-secret"}',
+            'utf8'
+        )
+        assert.throws(
+            () => readAiSearchConfig(invalidFile),
+            (error) => {
+                assert.doesNotMatch(error.message, /sk-config-secret/)
+                return true
+            }
+        )
+    } finally {
+        await rm(configDir, { recursive: true, force: true })
+    }
+})
+
+test('production public define is disabled and carries no private sentinels', async () => {
+    const { resolveUserConfig } = await import('vitepress')
+    const docsDirectory = path.resolve(
+        fileURLToPath(new URL('../docs/', import.meta.url))
+    )
+    const tempDir = await mkdtemp(
+        path.join(tmpdir(), 'ai-public-define-')
+    )
+    const fakeConfig = path.join(tempDir, 'model.json')
+    await writeFile(
+        fakeConfig,
+        JSON.stringify({
+            apiKey: 'FAKE_KEY_SENTINEL',
+            baseUrl: 'FAKE_ENDPOINT_SENTINEL',
+        }),
+        'utf8'
+    )
+
+    const previousConfig = process.env.AI_MODEL_CONFIG
+    try {
+        process.env.AI_MODEL_CONFIG = fakeConfig
+        const [config] = await resolveUserConfig(
+            docsDirectory,
+            'build',
+            'production'
+        )
+        const plugins = (config.vite?.plugins ?? []).flat(Infinity)
+        const plugin = plugins.find((entry) => entry?.name === 'ai-search')
+        assert.ok(plugin)
+        assert.equal(typeof plugin.config, 'function')
+
+        const partial = await plugin.config(
+            {},
+            { command: 'build', mode: 'production' }
+        )
+        assert.deepEqual(partial.define, {
+            __AI_SEARCH_ENABLED__: 'false',
+        })
+        assert.equal(Object.keys(partial.define).length, 1)
+
+        const publicDefine = JSON.stringify(partial)
+        assert.doesNotMatch(
+            publicDefine,
+            /FAKE_KEY_SENTINEL|FAKE_ENDPOINT_SENTINEL|AI_MODEL_CONFIG/
+        )
+        assert.doesNotMatch(publicDefine, /provider|baseUrl|apiKey/i)
+    } finally {
+        if (previousConfig === undefined) {
+            delete process.env.AI_MODEL_CONFIG
+        } else {
+            process.env.AI_MODEL_CONFIG = previousConfig
+        }
+        await rm(tempDir, { recursive: true, force: true })
+    }
+})
+
+test('enforces the configured model timeout and reports it without details', async () => {
+    let calls = 0
+    const requestModel = ({ signal }) => {
+        calls += 1
+        return new Promise((resolve, reject) => {
+            const abort = () => {
+                reject(
+                    Object.assign(new Error('aborted'), {
+                        code: 'ABORT_ERR',
+                    })
+                )
+            }
+            if (signal.aborted) {
+                abort()
+                return
+            }
+            signal.addEventListener('abort', abort, { once: true })
+        })
+    }
+
+    const service = createService({ requestModel, timeoutMs: 20 })
+    assert.equal(service.timeoutMs, 20)
+
+    const direct = await service.search('pendulum period', 'en')
+    assert.equal(direct.status, 'timeout')
+    assert.deepEqual(direct.sources, [])
+    assert.equal(calls, 1)
+
+    const response = await callService(service, {
+        body: queryBody('pendulum period', 'en'),
+    })
+    assert.equal(response.status, 504)
+    assert.equal(response.json.ok, false)
+    assert.equal(response.json.code, 'timeout')
+    assert.equal(calls, 2)
+    assert.doesNotMatch(
+        response.rawBody,
+        /sk-|example\.invalid|private|provider|config/i
+    )
+
+    const adapterTimeout = createService({
+        requestModel: async () => {
+            throw Object.assign(
+                new Error('provider https://example.invalid sk-leak'),
+                { code: 'MODEL_TIMEOUT' }
+            )
+        },
+    })
+    const adapterResponse = await callService(adapterTimeout, {
+        body: queryBody('pendulum period', 'en'),
+    })
+    assert.equal(adapterResponse.status, 504)
+    assert.equal(adapterResponse.json.code, 'timeout')
+    assert.doesNotMatch(
+        adapterResponse.rawBody,
+        /sk-leak|example\.invalid|provider/
+    )
+})
+
+test('production config compiles the client switch to false', async () => {
+    const { resolveUserConfig } = await import('vitepress')
+    const docsDirectory = path.resolve(
+        fileURLToPath(new URL('../docs/', import.meta.url))
+    )
+    const [config, configPath] = await resolveUserConfig(
+        docsDirectory,
+        'build',
+        'production'
+    )
+    assert.ok(configPath && configPath.endsWith('config.mts'))
+    assert.deepEqual(config.vite?.server?.fs?.allow, [
+        docsDirectory,
+        path.join(docsDirectory, 'public'),
+        path.join(docsDirectory, '..', 'node_modules'),
+    ])
+    assert.equal(config.vite?.server?.fs?.strict, true)
+    assert.equal(config.vite?.server?.fs?.deny, undefined)
+    assert.ok(
+        !config.vite.server.fs.allow.some((entry) =>
+            /[\\/](?:tools|scripts|README)/u.test(entry)
+        )
+    )
+    const plugins = (config.vite?.plugins ?? []).flat(Infinity)
+    const plugin = plugins.find((entry) => entry?.name === 'ai-search')
+    assert.ok(plugin)
+    assert.equal(typeof plugin.config, 'function')
+    assert.equal(typeof plugin.buildStart, 'function')
+
+    const previousConfig = process.env.AI_MODEL_CONFIG
+    try {
+        process.env.AI_MODEL_CONFIG = path.join(
+            docsDirectory,
+            'public',
+            'private-model.json'
+        )
+        assert.throws(
+            () => plugin.buildStart(),
+            /must not be inside a served or publishable path/
+        )
+    } finally {
+        if (previousConfig === undefined) {
+            delete process.env.AI_MODEL_CONFIG
+        } else {
+            process.env.AI_MODEL_CONFIG = previousConfig
+        }
+    }
+
+    const partial = await plugin.config(
+        {},
+        { command: 'build', mode: 'production' }
+    )
+    assert.deepEqual(partial.define, {
+        __AI_SEARCH_ENABLED__: 'false',
+    })
 })
 
 test('uses the expected tokenizer for English and Chinese', () => {

@@ -9,17 +9,19 @@ import './fonts/noto-sans-sc.css'
 import './style.css'
 import LocalMermaid from './LocalMermaid.vue'
 
+declare const __AI_SEARCH_ENABLED__: boolean
+
 /*
- * The AI search entry is a development-only addition to the default layout.
- * In a production build `import.meta.env.DEV` is statically false, so the
- * default layout is used unchanged and the development-only chunk is not
- * loaded. Existing navigation, local search, fonts, and CSP remain untouched.
+ * AI search is added to the default layout only when the resolved public
+ * switch is true. Production builds always compile the switch to false, so
+ * the default layout is used unchanged and the AI chunk is not loaded.
+ * Existing navigation, local search, fonts, and CSP remain untouched.
  */
-const LocalAISearch = import.meta.env.DEV
+const LocalAISearch = __AI_SEARCH_ENABLED__
     ? defineAsyncComponent(() => import('./LocalAISearch.vue'))
     : null
 
-const Layout: Theme['Layout'] = import.meta.env.DEV
+const Layout: Theme['Layout'] = __AI_SEARCH_ENABLED__
     ? () =>
           h(DefaultTheme.Layout, null, {
               'layout-bottom': () => h(LocalAISearch!)

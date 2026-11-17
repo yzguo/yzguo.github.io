@@ -34,7 +34,12 @@ import { restoreMermaidBlocks, translateMermaidBlocks } from './mermaid-translat
 import { translateBodyFragments } from './translate-body.mjs'
 import { assertSafeGeneratedMarkup } from './markdown-security.mjs'
 import { assertSafeDirectory, assertSafePath, resolveRealRoot } from './path-safety.mjs'
-import { OMP_MODEL, requestModel as defaultRequestModel } from '../tools/omp-model.mjs'
+import {
+  AI_MODEL_CONFIG_PATH,
+  DEFAULT_TIMEOUT_MS,
+  requestModel as defaultRequestModel,
+  sanitizeModelError
+} from '../tools/ai-model.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 export const defaultRootDir = path.resolve(here, '..')
@@ -63,8 +68,7 @@ Page: %SOURCE%
 `
 
 function truncateError(error, maxLength = 2_000) {
-  const text = String(error?.message ?? error ?? '未知错误').trim()
-  return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text
+  return sanitizeModelError(error?.message ?? error ?? '未知错误', maxLength)
 }
 
 async function listMarkdownFiles(dir, relative = '') {
@@ -203,7 +207,7 @@ export async function planTranslations(collection) {
 }
 
 function buildBodyPrompt(maskedBody, sourcePath) {
-  const boundary = `OMP_TRANSLATE_${randomBytes(12).toString('hex')}`
+  const boundary = `AI_TRANSLATE_${randomBytes(12).toString('hex')}`
   return bodyPromptInstruction
     .replace('%SOURCE%', () => sourcePath)
     .replaceAll('%BOUNDARY%', boundary)
@@ -334,7 +338,7 @@ function finishTextUnit(unit, translated) {
 }
 
 function buildBatchPrompt(units, sourcePath) {
-  const boundary = `OMP_BATCH_${randomBytes(12).toString('hex')}`
+  const boundary = `AI_BATCH_${randomBytes(12).toString('hex')}`
   const segments = units.map((unit, index) => ({
     id: `S${index + 1}`,
     text: unit.masked.text
@@ -871,15 +875,15 @@ export function parseCliArgs(argv = []) {
       options.root = value
     } else if (argument === '--timeout') {
       const value = argv[index + 1]
-      if (!value || !/^\d+$/.test(value) || Number(value) < 1) {
-        throw new Error('--timeout 需要正整数的毫秒数')
+      if (!value || !/^\d+$/.test(value) || Number(value) < 1 || Number(value) > 2_147_483_647) {
+        throw new Error('--timeout 需要 1 到 2147483647 之间的整数毫秒数')
       }
       options.timeoutMs = Number(value)
       index += 1
     } else if (argument.startsWith('--timeout=')) {
       const value = argument.slice('--timeout='.length)
-      if (!/^\d+$/.test(value) || Number(value) < 1) {
-        throw new Error('--timeout 需要正整数的毫秒数')
+      if (!/^\d+$/.test(value) || Number(value) < 1 || Number(value) > 2_147_483_647) {
+        throw new Error('--timeout 需要 1 到 2147483647 之间的整数毫秒数')
       }
       options.timeoutMs = Number(value)
     } else {
@@ -904,12 +908,13 @@ function helpText() {
   --force              允许覆盖已存在的英文页面；必须同时使用 --write
   --only <路径>        只处理指定中文源或英文目标，可重复
   --root <目录>        在隔离目录中运行（用于临时副本或单对文件的真实模型验证）
-  --timeout <毫秒>     单次模型请求超时，默认 180000
+  --timeout <毫秒>     单次模型请求超时，默认 ${DEFAULT_TIMEOUT_MS}
   --help               显示本帮助
 
 模型：
-  通过本机 Oh My Pi 的 auth-gateway stdio 调用 ${OMP_MODEL}，
-  复用本机已有的 OMP 模型注册与认证；不会读取、复制或输出密钥。
+  通过本机私有配置 ${AI_MODEL_CONFIG_PATH}（YAML；已被 .gitignore 忽略）调用
+  OpenAI-compatible chat completions 端点；模型与端点来自该配置，密钥不会输出。
+  可用 AI_MODEL_CONFIG、AI_MODEL、AI_REQUEST_TIMEOUT_MS 覆盖；不需要 OMP 程序或登录。
   所有中文源先移除 HTML 注释与显式私有块，再发送给模型。
   Mermaid 图中读者可见的中文节点、连线、标题标签会单独翻译；图类型、节点 ID、
   连接结构、样式和普通程序代码逐字保留；无法安全识别的中文 Mermaid 语法会失败。

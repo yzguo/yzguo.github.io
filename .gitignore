@@ -3,6 +3,17 @@ node_modules
 .env
 .env.*
 !.env.example
+# Local model credentials and private configuration. These must never be
+# committed, bundled, or copied into build output.
+/tools/api-key.txt
+/tools/api-key.*
+/tools/*.key
+/tools/*.pem
+/tools/*.secret.*
+/tools/*.private.*
+/tools/*.local.*
+/tools/.env
+/tools/.env.*
 /.omp/
 .omp-translate-backup-*.tmp
 .omp-translate-conflict-*.tmp

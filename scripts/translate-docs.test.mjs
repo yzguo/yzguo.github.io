@@ -207,7 +207,7 @@ test('generated English preserves code, math, links, and never includes private 
 })
 
 test('translation prompts never receive protected code, formulas, or URLs', async (t) => {
-  const sentinel = 'OMP_TRANSLATE_SENTINEL_LOCAL_ONLY_2c9d'
+  const sentinel = 'AI_TRANSLATE_SENTINEL_LOCAL_ONLY_2c9d'
   const source = [
     '# 标题',
     '',
@@ -258,7 +258,7 @@ test('translation prompts never receive protected code, formulas, or URLs', asyn
     md
   })
 
-  assert.match(english, /```js\nconst fenced = 'OMP_TRANSLATE_SENTINEL_LOCAL_ONLY_2c9d'\n```/)
+  assert.match(english, /```js\nconst fenced = 'AI_TRANSLATE_SENTINEL_LOCAL_ONLY_2c9d'\n```/)
   assert.match(english, new RegExp(`    const indented = '${sentinel}'`))
   assert.match(english, new RegExp(`Inline \`${sentinel}\` value\\.`))
   assert.match(english, new RegExp(`\\$${sentinel}\\$`))

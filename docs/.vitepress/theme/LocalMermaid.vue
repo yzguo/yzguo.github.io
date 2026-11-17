@@ -9,12 +9,12 @@ const error = ref('')
 const id = 'mermaid-' + useId().replace(/[^a-zA-Z0-9-]/g, '')
 let generation = 0
 
-// Must stay in sync with the base/mono stacks in ../style.css. Mermaid writes
-// this stack into the generated SVG, so CJK, emoji and PUA icon labels use the
-// same locally hosted faces as the surrounding page.
-const diagramFont = '"Latin Modern Roman", "Symbols Nerd Font", "Noto Emoji", "Twemoji Mozilla", "Noto Sans SC"'
+// Must stay in sync with the base stack in ../style.css. Mermaid writes this
+// stack into the generated SVG, so Latin labels use the local Noto Sans SC
+// Latin faces, CJK uses the local Noto Sans SC CJK faces, and emoji/PUA icons
+// keep the same locally hosted faces as the surrounding page.
+const diagramFont = '"Noto Sans SC Latin", "Symbols Nerd Font", "Noto Emoji", "Twemoji Mozilla", "Noto Sans SC"'
 
-const hanPattern = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Bopomofo}\u3000-\u303F\uFF00-\uFFEF]/gu
 const iconPattern = /[\uE000-\uF8FF\u{F0000}-\u{FFFFD}\u{100000}-\u{10FFFD}]/gu
 const emojiPattern = /[\p{Extended_Pictographic}\p{Emoji_Modifier}\p{Regional_Indicator}]/gu
 const vs16Pattern = /\p{Extended_Pictographic}\uFE0F/gu
@@ -27,18 +27,19 @@ const vs16Pattern = /\p{Extended_Pictographic}\uFE0F/gu
 async function ensureDiagramFonts(text: string) {
     if (typeof document === 'undefined' || !document.fonts) return
 
+    const sample = text || 'Mermaid'
     const loads = [
-        document.fonts.load('16px "Latin Modern Roman"', text || 'Mermaid'),
-        document.fonts.load('700 16px "Latin Modern Roman"', text || 'Mermaid')
+        document.fonts.load('16px "Noto Sans SC Latin"', sample),
+        document.fonts.load('700 16px "Noto Sans SC Latin"', sample),
+        document.fonts.load('16px "Noto Sans SC"', sample),
+        document.fonts.load('700 16px "Noto Sans SC"', sample)
     ]
-    const han = text.match(hanPattern)?.join('')
     const icons = text.match(iconPattern)?.join('')
     const emoji = text.match(emojiPattern)?.join('')
         ?.replace(/[\u00A9\u00AE\u2122]/g, '')
     const keycaps = text.match(/[#*0-9]\uFE0F?\u20E3/gu)?.join('') ?? ''
     const vs16 = text.match(vs16Pattern)?.join('') ?? ''
 
-    if (han) loads.push(document.fonts.load('16px "Noto Sans SC"', han))
     if (icons) loads.push(document.fonts.load('16px "Symbols Nerd Font"', icons))
     if (emoji) {
         // Only request joiners/presentation selectors that are actually in the

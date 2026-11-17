@@ -9,9 +9,10 @@ import {
   compareStructures,
   compareUiConfigurations,
   getMarkdownParser,
-  parseVerdict,
-  sanitizeProcessOutput
+  parseCheckerArgs,
+  parseVerdict
 } from './check-bilingual.mjs'
+import { sanitizeModelError } from '../tools/ai-model.mjs'
 
 const defaultReadme = {
   'README.md': '# Project\n\nEnglish readme.\n',
@@ -205,15 +206,44 @@ test('verdict parsing accepts only a complete structured verdict', () => {
   assert.throws(() => parseVerdict('{"equivalent":true,"issues":[1]}'), /non-empty strings/)
 })
 
-test('process diagnostics redact URLs and bearer tokens', () => {
+test('model diagnostics redact URLs and bearer tokens', () => {
   assert.equal(
-    sanitizeProcessOutput('endpoint https://gateway.example/v1 failed; Bearer abc.def'),
+    sanitizeModelError('endpoint https://gateway.example/v1 failed; Bearer abc.def'),
     'endpoint <url-redacted> failed; Bearer <redacted>'
   )
 })
 
+test('checker CLI accepts and validates --timeout', () => {
+  assert.deepEqual(parseCheckerArgs(['--timeout', '1234']), {
+    rootDir: undefined,
+    timeoutMs: 1234,
+    help: false
+  })
+  assert.equal(parseCheckerArgs(['--timeout=250']).timeoutMs, 250)
+  assert.throws(() => parseCheckerArgs(['--timeout', '0']), /--timeout/)
+  assert.throws(() => parseCheckerArgs(['--timeout=abc']), /--timeout/)
+  assert.throws(() => parseCheckerArgs(['--timeout', '2147483648']), /--timeout/)
+})
+
+test('checker passes its timeout to every model request', async (t) => {
+  const rootDir = await makeProject(t, {
+    'docs/index.md': '# Home\n\nWelcome.\n',
+    'docs/zh-cn/index.md': '# 首页\n\n欢迎。\n'
+  })
+  const timeouts = []
+  const requestModel = async ({ timeoutMs }) => {
+    timeouts.push(timeoutMs)
+    return validResult()
+  }
+  const result = await checkWithConfig({ rootDir, requestModel, timeoutMs: 4321 })
+
+  assert.deepEqual(result.errors, [])
+  assert.ok(timeouts.length >= 2)
+  assert.ok(timeouts.every((value) => value === 4321))
+})
+
 test('semantic prompts never receive protected code, formulas, or URLs', async (t) => {
-  const sentinel = 'OMP_SENTINEL_LOCAL_ONLY_7f4c'
+  const sentinel = 'AI_SENTINEL_LOCAL_ONLY_7f4c'
   const page = [
     '---',
     `image: /${sentinel}.png`,
@@ -493,7 +523,7 @@ test('a config semantic failure fails the check', async (t) => {
   })
   const requestModel = async ({ prompt }) => {
     if (prompt.includes('Configuration pair: docs/.vitepress/en-us.ts vs docs/.vitepress/zh-cn.ts')) {
-      throw new Error('spawn omp ENOENT')
+      throw new Error('model service unavailable ENOENT')
     }
     return validResult()
   }
@@ -501,8 +531,8 @@ test('a config semantic failure fails the check', async (t) => {
 
   assert.equal(result.errors.length, 1)
   assert.match(result.errors[0], /docs\/\.vitepress\/en-us\.ts vs docs\/\.vitepress\/zh-cn\.ts/)
-  assert.match(result.errors[0], /无法调用本机 OMP 模型/)
-  assert.match(result.errors[0], /spawn omp ENOENT/)
+  assert.match(result.errors[0], /无法调用模型/)
+  assert.match(result.errors[0], /ENOENT/)
 })
 
 test('a config load failure fails and is not silently skipped', async (t) => {
@@ -537,7 +567,7 @@ test('an unparseable semantic verdict fails the check', async (t) => {
   assert.match(result.errors[0], /issues/)
 })
 
-test('a process or authentication failure fails the check with stderr', async (t) => {
+test('an authentication failure fails the check', async (t) => {
   const rootDir = await makeProject(t, {
     'docs/index.md': '# Home\n\nWelcome.\n',
     'docs/zh-cn/index.md': '# 首页\n\n欢迎。\n'
@@ -549,23 +579,23 @@ test('a process or authentication failure fails the check with stderr', async (t
   const result = await checkWithConfig({ rootDir, requestModel })
 
   assert.equal(result.errors.length, 1)
-  assert.match(result.errors[0], /无法调用本机 OMP 模型/)
+  assert.match(result.errors[0], /无法调用模型/)
   assert.match(result.errors[0], /401 Unauthorized/)
 })
 
-test('a missing omp executable fails the check', async (t) => {
+test('a missing model service fails the check', async (t) => {
   const rootDir = await makeProject(t, {
     'docs/index.md': '# Home\n\nWelcome.\n',
     'docs/zh-cn/index.md': '# 首页\n\n欢迎。\n'
   })
   const requestModel = async ({ prompt }) => {
     if (!isDocsIndexPrompt(prompt)) return validResult()
-    throw new Error('Unable to start OMP auth gateway: spawn omp ENOENT')
+    throw new Error('Unable to reach model service: ENOENT')
   }
   const result = await checkWithConfig({ rootDir, requestModel })
 
   assert.equal(result.errors.length, 1)
-  assert.match(result.errors[0], /无法调用本机 OMP 模型/)
+  assert.match(result.errors[0], /无法调用模型/)
   assert.match(result.errors[0], /ENOENT/)
 })
 

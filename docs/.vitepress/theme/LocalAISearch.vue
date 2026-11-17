@@ -15,13 +15,19 @@ type Outcome =
     | 'model_error'
     | 'busy'
     | 'request_error'
+    | 'cancelled'
+
+declare const __AI_SEARCH_ENABLED__: boolean
 
 const AI_SEARCH_PATH = '/__ai-search'
-const REQUEST_TIMEOUT_MS = 75_000
+// The server/model timeout defaults to 300000ms. This finite 15-minute hard
+// stop only covers a hung dev server; a normal server timeout produces an
+// explicit error at 300 seconds. Keep AI_REQUEST_TIMEOUT_MS below this bound.
+const REQUEST_TIMEOUT_MS = 900_000
 
-// The production bundle must not expose an AI search entry. The layout only
-// mounts this component in development; this flag is a second, explicit guard.
-const enabled = import.meta.env.DEV
+// The switch is resolved once at build/dev-server time. Production builds
+// always compile it to false, so this component never mounts there.
+const enabled = __AI_SEARCH_ENABLED__
 
 const { lang } = useData()
 const route = useRoute()
@@ -47,7 +53,7 @@ const inputId = 'local-ai-search-query-' + useId().replace(/[^a-zA-Z0-9-]/g, '')
 const labels = computed(() => {
     if (isChinese.value) {
         return {
-            trigger: 'AI 搜索（仅本地开发）',
+            trigger: 'AI 搜索',
             triggerMark: 'AI',
             triggerText: '搜索',
             title: '用 AI 搜索本站',
@@ -56,19 +62,21 @@ const labels = computed(() => {
             placeholder: '询问本站的公开文档…',
             ask: '提问',
             asking: '思考中…',
-            note: '仅在本地开发环境可用。问题与选中的公开页面摘录会发送到本机配置的 OMP 模型；不会发送到本网站的线上主机。',
-            loading: '正在检索站内公开文档并请求本地模型…',
+            cancel: '取消',
+            note: 'AI 搜索仅在本机开发服务器启用。问题与选中的公开页面摘录只会发送到本机配置的 AI 模型；线上静态站点不提供此功能。',
+            loading: '正在检索站内公开文档并请求本机 AI 模型…',
             noResults: '没有找到匹配的公开页面。可以试试原有的搜索（Ctrl/Cmd+K）。',
-            modelError: '本地 AI 模型暂时无法回答。原有的搜索仍然可用。',
-            busy: '本地 AI 模型正在回答另一个问题，请稍后再试。原有的搜索仍然可用。',
-            requestError: '无法连接本地 AI 搜索。原有的搜索仍然可用。',
-            timeout: '本地 AI 模型响应超时。原有的搜索仍然可用。',
+            modelError: '本机 AI 模型暂时无法回答。原有的搜索仍然可用。',
+            busy: '本机 AI 模型正在回答另一个问题，请稍后再试。原有的搜索仍然可用。',
+            requestError: '无法连接本机 AI 搜索。原有的搜索仍然可用。',
+            timeout: 'AI 模型响应超时。原有的搜索仍然可用。',
+            cancelled: '已取消 AI 回答请求。',
             sources: '来源',
         }
     }
 
     return {
-        trigger: 'AI search (local development only)',
+        trigger: 'AI search',
         triggerMark: 'AI',
         triggerText: 'Search',
         title: 'Search this site with AI',
@@ -77,13 +85,15 @@ const labels = computed(() => {
         placeholder: 'Ask about this site’s public documentation…',
         ask: 'Ask',
         asking: 'Thinking…',
-        note: 'Local development only. The question and selected public page excerpts are sent to your locally configured OMP model; nothing is sent to this website’s production host.',
-        loading: 'Searching public site pages and asking the local model…',
+        cancel: 'Cancel',
+        note: 'AI search is available only on the local development server. The question and selected public page excerpts are sent only to the AI model configured on this computer; the public static site does not offer this feature.',
+        loading: 'Searching public site pages and asking the local AI model…',
         noResults: 'No matching public page was found. Try the normal search (Ctrl/Cmd+K).',
         modelError: 'The local AI model could not answer. The normal search is still available.',
         busy: 'The local AI model is answering another question. Try again in a moment; the normal search is still available.',
         requestError: 'The local AI search could not be reached. The normal search is still available.',
-        timeout: 'The local AI model took too long to answer. The normal search is still available.',
+        timeout: 'The AI model took too long to answer. The normal search is still available.',
+        cancelled: 'AI answer request cancelled.',
         sources: 'Sources',
     }
 })
@@ -163,6 +173,14 @@ function cancelRequest() {
         timeoutHandle = undefined
     }
     loading.value = false
+}
+
+/** Stop an in-flight answer and show explicit cancellation feedback. */
+function cancelAnswer() {
+    if (!loading.value) return
+    cancelRequest()
+    outcome.value = 'cancelled'
+    errorMessage.value = ''
 }
 
 function openDialog() {
@@ -269,6 +287,12 @@ async function ask() {
 
         if (body && body.code === 'busy') {
             outcome.value = 'busy'
+            return
+        }
+
+        if (body && body.code === 'timeout') {
+            outcome.value = 'request_error'
+            errorMessage.value = labels.value.timeout
             return
         }
 
@@ -399,6 +423,15 @@ onBeforeUnmount(() => {
                     >
                         {{ loading ? labels.asking : labels.ask }}
                     </button>
+                    <button
+                        v-if="loading"
+                        class="local-ai-cancel"
+                        type="button"
+                        data-testid="ai-search-cancel"
+                        @click="cancelAnswer"
+                    >
+                        {{ labels.cancel }}
+                    </button>
                 </form>
 
                 <p class="local-ai-note">{{ labels.note }}</p>
@@ -479,6 +512,16 @@ onBeforeUnmount(() => {
                     >
                         {{ errorMessage || labels.requestError }}
                     </p>
+
+                    <p
+                        v-else-if="outcome === 'cancelled'"
+                        class="local-ai-status"
+                        data-testid="ai-search-cancelled"
+                        data-result="cancelled"
+                        role="status"
+                    >
+                        {{ labels.cancelled }}
+                    </p>
                 </div>
             </section>
         </div>
@@ -517,6 +560,7 @@ onBeforeUnmount(() => {
 .local-ai-trigger:focus-visible,
 .local-ai-close:focus-visible,
 .local-ai-submit:focus-visible,
+.local-ai-cancel:focus-visible,
 .local-ai-source:focus-visible,
 .local-ai-input:focus-visible {
     outline: 2px solid var(--vp-c-brand-1, #0078d4);
@@ -651,6 +695,25 @@ onBeforeUnmount(() => {
     cursor: not-allowed;
 }
 
+.local-ai-cancel {
+    flex: none;
+    padding: 9px 14px;
+    border: 1px solid var(--vp-c-divider, #e2e2e3);
+    border-radius: 9px;
+    background: transparent;
+    color: var(--vp-c-text-2, #4b5563);
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.5;
+    cursor: pointer;
+}
+
+.local-ai-cancel:hover {
+    border-color: var(--vp-c-text-3, #8b949e);
+    color: var(--vp-c-text-1, #1f2328);
+}
+
 .local-ai-note {
     margin: 10px 0 0;
     color: var(--vp-c-text-2, #4b5563);
@@ -783,6 +846,10 @@ onBeforeUnmount(() => {
     }
 
     .local-ai-submit {
+        width: 100%;
+    }
+
+    .local-ai-cancel {
         width: 100%;
     }
 }
