@@ -43,10 +43,36 @@ test('masking preserves syntax while leaving visible prose translatable', () => 
   assert.match(restored, /`行内代码`/)
   assert.match(restored, /\$a\+b\$/)
   assert.match(restored, /!\[图片\]\(\/images\/pic\.png\)/)
-  assert.match(restored, /\[博客\]\(\/Notes\/\)/)
-  assert.match(restored, /<a href="\/About\/">About<\/a>/)
+  assert.match(restored, /\[博客\]\(\/en\/Notes\/\)/)
+  assert.match(restored, /<a href="\/en\/About\/">About<\/a>/)
   assert.match(restored, /```mermaid\nflowchart TD\n  A\[中文\] --> B\[结束\]\n```/)
-  assert.match(restored, /\[ref\]: \/Projects\/ "项目"/)
+  assert.match(restored, /\[ref\]: \/en\/Projects\/ "项目"/)
+})
+
+test('masking can target Traditional, canonical, or raw destinations', () => {
+  const source = '[博客](/zh-cn/Notes/) 与 <a href="/zh-cn/About/">关于</a>'
+
+  const traditional = maskMarkdown(source, { tokenPrefix: prefix, targetLocale: 'zh-tw' })
+  assert.ok(traditional.tokens.some((entry) => entry.value === '(/zh-tw/Notes/)'))
+  assert.ok(traditional.tokens.some((entry) => entry.value === '<a href="/zh-tw/About/">'))
+
+  const canonical = maskMarkdown(source, { tokenPrefix: prefix, targetLocale: 'canonical' })
+  assert.ok(canonical.tokens.some((entry) => entry.value === '(/Notes/)'))
+  assert.ok(canonical.tokens.some((entry) => entry.value === '<a href="/About/">'))
+
+  const preserved = maskMarkdown(source, { tokenPrefix: prefix, targetLocale: null })
+  assert.ok(preserved.tokens.some((entry) => entry.value === '(/zh-cn/Notes/)'))
+  assert.ok(preserved.tokens.some((entry) => entry.value === '<a href="/zh-cn/About/">'))
+})
+
+test('whole-link targets are localized without rewriting labels', () => {
+  const masked = maskMarkdown('[`代码`](/zh-cn/Notes/)', {
+    tokenPrefix: prefix,
+    targetLocale: 'zh-tw'
+  })
+  assert.equal(masked.tokens[0].kind, 'link-whole')
+  assert.match(masked.tokens[0].value, /\]\(\/zh-tw\/Notes\/\)$/)
+  assert.doesNotMatch(masked.tokens[0].value, /\/zh-cn\//)
 })
 
 test('placeholders must appear exactly once and in order', () => {
@@ -63,6 +89,21 @@ test('placeholders must appear exactly once and in order', () => {
   assert.throws(
     () => restoreMaskedMarkdown(`B ${second.token} A ${first.token}`, masked.tokens),
     /reordered/
+  )
+})
+
+test('a bare URL as a link label keeps its closing bracket', () => {
+  const body = '[https://example.com/label](https://example.com/target)'
+  const masked = maskMarkdown(body, {
+    tokenPrefix: prefix,
+    protectBareUrls: true,
+    targetLocale: 'zh-tw'
+  })
+  assert.match(masked.text, /^\[@@[A-Za-z0-9_]+@@\]@@TESTTOKEN_\d+@@$/)
+  assert.equal(restoreMaskedMarkdown(masked.text, masked.tokens), body)
+  assert.throws(
+    () => restoreMaskedMarkdown(masked.text.replace(']@@', '@@'), masked.tokens),
+    /broke the Markdown link syntax/
   )
 })
 

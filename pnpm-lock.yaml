@@ -172,6 +172,9 @@ importers:
       mermaid:
         specifier: 11.17.2
         version: 11.17.2
+      opencc-js:
+        specifier: 1.0.5
+        version: 1.0.5
       vitepress:
         specifier: ^2.0.0-alpha.20
         version: 2.0.0-alpha.20(markdown-it-mathjax3@4.3.2)(postcss@8.5.30)(yaml@2.9.1)
@@ -1104,6 +1107,9 @@ packages:
 
   oniguruma-to-es@4.3.6:
     resolution: {integrity: sha512-csuQ9x3Yr0cEIs/Zgx/OEt9iBw9vqIunAPQkx19R/fiMq2oGVTgcMqO/V3Ybqefr1TBvosI6jU539ksaBULJyA==}
+
+  opencc-js@1.0.5:
+    resolution: {integrity: sha512-LD+1SoNnZdlRwtYTjnQdFrSVCAaYpuDqL5CkmOaHOkKoKh7mFxUicLTRVNLU5C+Jmi1vXQ3QL4jWdgSaa4sKjg==}
 
   package-manager-detector@1.9.0:
     resolution: {integrity: sha512-zAMfbta9nPA8AKkA4WdmNAT8R8s6Dk0/xwPsqNnRidMFcLo1YkLuPDTgs2f64XdzS8vbLNnoJ+uUIkgbz7oRHA==}
@@ -2258,6 +2264,8 @@ snapshots:
       oniguruma-parser: 0.12.2
       regex: 6.1.0
       regex-recursion: 6.0.2
+
+  opencc-js@1.0.5: {}
 
   package-manager-detector@1.9.0: {}
 

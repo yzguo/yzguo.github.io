@@ -640,6 +640,70 @@ export async function translateMermaidSource(source, options = {}) {
   return translated
 }
 
+// Deterministic locale conversion for Mermaid diagrams. Only reader-visible
+// labels are passed through the supplied text converter; ids, arrows, shapes,
+// comments, and diagram syntax stay byte-for-byte unchanged and are validated
+// against the original skeleton.
+export function convertMermaidSource(source, convertText) {
+  if (typeof source !== 'string') throw new TypeError('Mermaid source must be a string')
+  if (typeof convertText !== 'function') throw new TypeError('convertMermaidSource 需要 convertText')
+  const type = detectType(source)
+  if (type === 'empty') {
+    const offset = findVisibleCjk(source, [])
+    if (offset !== -1) {
+      throw new MermaidTranslationError(
+        `第 ${lineNumberAt(source, offset)} 行的 Mermaid 缺少可安全识别的图类型`
+      )
+    }
+    return source
+  }
+  if (type === 'unsupported') {
+    const offset = findVisibleCjk(source, [])
+    if (offset !== -1) {
+      throw new MermaidTranslationError(
+        `第 ${lineNumberAt(source, offset)} 行的 Mermaid 图类型无法安全转换`
+      )
+    }
+    return source
+  }
+
+  const records = extractRecords(source, type)
+  const unsupportedCjk = findVisibleCjk(source, records)
+  if (unsupportedCjk !== -1) {
+    throw new MermaidTranslationError(
+      `第 ${lineNumberAt(source, unsupportedCjk)} 行的 Mermaid 中文内容不属于可安全转换的标签`
+    )
+  }
+
+  const translatedByRecord = new Map()
+  for (const record of records) {
+    const converted = convertText(record.value)
+    if (typeof converted !== 'string' || converted.trim() === '') {
+      throw new MermaidTranslationError(`Mermaid ${record.kind} 转换结果为空`)
+    }
+    translatedByRecord.set(record, converted)
+  }
+
+  let translated = ''
+  let position = 0
+  for (const record of records) {
+    translated += source.slice(position, record.start)
+    translated += encodeRecord(record, translatedByRecord.get(record))
+    position = record.end
+  }
+  translated += source.slice(position)
+
+  const translatedRecords = extractRecords(translated, type)
+  if (
+    translatedRecords.length !== records.length ||
+    translatedRecords.some((record, index) => record.kind !== records[index].kind) ||
+    skeleton(translated, translatedRecords) !== skeleton(source, records)
+  ) {
+    throw new MermaidTranslationError('Mermaid 结构校验失败，已拒绝写入')
+  }
+  return translated
+}
+
 function fenceLanguage(info) {
   return String(info ?? '').trim().split(/\s+/)[0].replace(/\{.*$/, '').toLowerCase()
 }
@@ -711,6 +775,33 @@ export async function translateMermaidBlocks(body, options = {}) {
     tokens.push({
       token,
       value: `${block.opening}${translated}${block.closing}`
+    })
+    output += body.slice(position, block.start)
+    output += token
+    position = block.end
+    if (position < body.length && body[position] !== '\n') output += '\n'
+  }
+  output += body.slice(position)
+  return { body: output, tokens }
+}
+
+export function convertMermaidBlocks(body, options = {}) {
+  if (typeof body !== 'string') throw new TypeError('Markdown body must be a string')
+  const convertText = options.convertText
+  if (typeof convertText !== 'function') throw new TypeError('convertMermaidBlocks 需要 convertText')
+  const blocks = findMermaidFences(body)
+  if (blocks.length === 0) return { body, tokens: [] }
+
+  const prefix = tokenPrefixFor(body)
+  const tokens = []
+  let output = ''
+  let position = 0
+  for (const block of blocks) {
+    const converted = convertMermaidSource(block.content, convertText)
+    const token = `@@${prefix}_${tokens.length + 1}@@`
+    tokens.push({
+      token,
+      value: `${block.opening}${converted}${block.closing}`
     })
     output += body.slice(position, block.start)
     output += token

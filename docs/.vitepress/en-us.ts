@@ -3,16 +3,17 @@ import { defineConfig, type DefaultTheme } from 'vitepress'
 export const en_us = defineConfig({
     lang: 'en-US',
     description: "Personal homepage.",
+    title: 'Yanzhen Guo',
     themeConfig: {
         nav: [
-            { text: 'About', link: '/About/', activeMatch: '^/About/' },
-            { text: 'Projects', link: '/Projects/', activeMatch: '^/Projects/' },
-            { text: 'Notes', link: '/Notes/', activeMatch: '^/Notes/' }
+            { text: 'About', link: '/en/About/', activeMatch: '^/en/About/' },
+            { text: 'Projects', link: '/en/Projects/', activeMatch: '^/en/Projects/' },
+            { text: 'Notes', link: '/en/Notes/', activeMatch: '^/en/Notes/' }
         ],
         sidebar: {
-            '/About/': sidebarAbout(),
-            '/Projects/': sidebarProjects(),
-            '/Notes/': sidebarNotes()
+            '/en/About/': sidebarAbout(),
+            '/en/Projects/': sidebarProjects(),
+            '/en/Notes/': sidebarNotes()
         },
         editLink: {
             pattern: 'https://github.com/yzguo/yzguo.github.io/edit/main/docs/:path',
@@ -31,32 +32,32 @@ export const en_us = defineConfig({
 })
 
 function sidebarAbout(): DefaultTheme.SidebarItem[] {
-    return [{ text: 'About', link: '/About/' }]
+    return [{ text: 'About', link: '/en/About/' }]
 }
 
 function sidebarProjects(): DefaultTheme.SidebarItem[] {
-    return [{ text: 'Projects', link: '/Projects/' }]
+    return [{ text: 'Projects', link: '/en/Projects/' }]
 }
 
 function sidebarNotes(): DefaultTheme.SidebarItem[] {
     return [{
         text: 'Notes',
-        link: '/Notes/',
+        link: '/en/Notes/',
         items: [
             {
                 text: 'Course notes',
-                link: '/Notes/Courses/',
-                items: [{ text: 'Course notes demo', link: '/Notes/Courses/demo' }]
+                link: '/en/Notes/Courses/',
+                items: [{ text: 'Course notes demo', link: '/en/Notes/Courses/demo' }]
             },
             {
                 text: 'Learning notes',
-                link: '/Notes/Learning/',
-                items: [{ text: 'Learning notes demo', link: '/Notes/Learning/demo' }]
+                link: '/en/Notes/Learning/',
+                items: [{ text: 'Learning notes demo', link: '/en/Notes/Learning/demo' }]
             },
             {
                 text: 'Work notes',
-                link: '/Notes/Work/',
-                items: [{ text: 'Work notes demo', link: '/Notes/Work/demo' }]
+                link: '/en/Notes/Work/',
+                items: [{ text: 'Work notes demo', link: '/en/Notes/Work/demo' }]
             }
         ]
     }]

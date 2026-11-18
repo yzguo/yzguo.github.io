@@ -17,6 +17,7 @@ import {
     createFileAccessGuard,
     parseAllowedHost,
     parseMarkdownPage,
+    pageUrlFor,
     resolveModelTimeoutMs,
     sanitizeSourcePath,
     searchDocs,
@@ -37,8 +38,20 @@ import {
 
 let docsRoot
 
+/**
+ * Most fixtures describe English pages. Public English content lives in
+ * `docs/en/` (URL `/en/...`), so unprefixed fixture names are written there.
+ * Locale-prefixed pages and the directory-exclusion fixtures keep their
+ * explicit path; root-level language-entry fixtures are written directly.
+ */
+const EXPLICIT_FIXTURE_PATH =
+    /^(?:en|zh-cn|zh-tw|\.hidden|dist|\.vitepress|public)(?:\/|$)/u
+
 async function writeDoc(relativePath, contents) {
-    const file = path.join(docsRoot, relativePath)
+    const target = EXPLICIT_FIXTURE_PATH.test(relativePath)
+        ? relativePath
+        : 'en/' + relativePath
+    const file = path.join(docsRoot, target)
     await mkdir(path.dirname(file), { recursive: true })
     await writeFile(file, contents, 'utf8')
 }
@@ -325,6 +338,35 @@ before(async () => {
                 '<!-- 中文私有注释 -->',
                 '',
             ].join('\n')
+        ),
+        writeDoc(
+            'zh-tw/pendulum.md',
+            [
+                '# 單擺物理',
+                '',
+                '## 週期',
+                '',
+                '小角度單擺的週期由擺長和重力決定。',
+                '',
+                '<!-- 繁體中文私有註解 -->',
+                '',
+            ].join('\n')
+        ),
+    ])
+
+    // The root path is an automatic language entry, not a searchable locale.
+    // Its Markdown must never appear in any language index.
+    await mkdir(path.join(docsRoot, 'About'), { recursive: true })
+    await Promise.all([
+        writeFile(
+            path.join(docsRoot, 'index.md'),
+            '# Root language entry\n\nroot-entry-marker\n',
+            'utf8'
+        ),
+        writeFile(
+            path.join(docsRoot, 'About', 'index.md'),
+            '# Root about\n\nroot-about-marker\n',
+            'utf8'
         ),
     ])
 })
@@ -739,7 +781,7 @@ test('uses VitePress YAML and the shared private-content sanitizer', async () =>
     }
 })
 
-test('indexes only public pages from public directories', async () => {
+test('indexes only public pages inside the locale directories', async () => {
     const index = await buildDocsIndex(docsRoot)
     const indexedText = index.chunks
         .map((chunk) => `${chunk.title}\n${chunk.heading}\n${chunk.text}`)
@@ -748,6 +790,19 @@ test('indexes only public pages from public directories', async () => {
     assert.match(indexedText, /pendulum/i)
     assert.doesNotMatch(indexedText, /private-comment-marker/)
     assert.doesNotMatch(indexedText, /Private frontmatter title/)
+    assert.doesNotMatch(indexedText, /root-entry-marker/)
+    assert.doesNotMatch(indexedText, /root-about-marker/)
+    for (const chunk of index.chunks) {
+        const locale = chunk.url.startsWith('/zh-cn/')
+            ? 'zh-cn'
+            : chunk.url.startsWith('/zh-tw/')
+              ? 'zh-tw'
+              : chunk.url.startsWith('/en/')
+                ? 'en'
+                : null
+        assert.ok(locale, chunk.url)
+        assert.equal(chunk.lang, locale, chunk.url)
+    }
     for (const marker of [
         'private-search-marker',
         'draft-marker',
@@ -799,10 +854,11 @@ test('retrieves relevant sections without mixing languages', async () => {
 
     const english = searchDocs(index, 'pendulum period', 'en')
     assert.ok(english.length > 0)
-    assert.equal(english[0].url, '/physics')
+    assert.equal(english[0].url, '/en/physics')
     assert.ok(
         english.some(
-            (match) => match.url === '/physics' && /period/i.test(match.text)
+            (match) =>
+                match.url === '/en/physics' && /period/i.test(match.text)
         )
     )
 
@@ -810,8 +866,30 @@ test('retrieves relevant sections without mixing languages', async () => {
     assert.ok(chinese.length > 0)
     assert.equal(chinese[0].url, '/zh-cn/pendulum')
 
+    const traditional = searchDocs(index, '單擺 週期', 'zh-TW')
+    assert.ok(traditional.length > 0)
+    assert.equal(traditional[0].url, '/zh-tw/pendulum')
+    assert.equal(
+        searchDocs(index, '單擺 週期', 'zh-HK')[0]?.url,
+        '/zh-tw/pendulum'
+    )
+    assert.equal(
+        searchDocs(index, 'pendulum period', 'en-GB')[0]?.url,
+        '/en/physics'
+    )
+    assert.ok(
+        traditional.some(
+            (match) =>
+                match.url === '/zh-tw/pendulum' &&
+                /週期/u.test(match.text)
+        )
+    )
+
     assert.deepEqual(searchDocs(index, 'pendulum period', 'zh'), [])
     assert.deepEqual(searchDocs(index, '单摆 周期', 'en'), [])
+    assert.deepEqual(searchDocs(index, '单摆 周期', 'zh-tw'), [])
+    assert.deepEqual(searchDocs(index, '單擺 週期', 'zh-cn'), [])
+    assert.deepEqual(searchDocs(index, '單擺 週期', 'en'), [])
     assert.deepEqual(searchDocs(index, 'unfindable-term-xyz', 'en'), [])
     assert.deepEqual(searchDocs(index, 'what is the', 'en'), [])
 })
@@ -853,7 +931,7 @@ test('answers from public retrieval context and returns safe sources', async () 
     assert.ok(Array.isArray(response.json.sources))
     assert.ok(response.json.sources.length > 0)
     for (const source of response.json.sources) {
-        assert.ok(source.url.startsWith('/'))
+        assert.ok(source.url.startsWith('/en/'))
         assert.ok(!source.url.startsWith('//'))
         assert.ok(!source.url.includes('\\'))
         assert.equal(sanitizeSourcePath(source.url), source.url)
@@ -863,6 +941,8 @@ test('answers from public retrieval context and returns safe sources', async () 
     const call = model.calls[0]
     assert.equal(call.timeoutMs, MODEL_TIMEOUT_MS)
     assert.match(call.system, /untrusted/i)
+    assert.match(call.system, /Answer in English/)
+    assert.doesNotMatch(call.system, /简体中文|繁體中文/)
     assert.match(call.prompt, /pendulum/i)
     assert.doesNotMatch(call.prompt, /private-comment-marker/)
     assert.doesNotMatch(call.prompt, /Private frontmatter title/)
@@ -885,12 +965,110 @@ test('Chinese retrieval uses Chinese context and sources', async () => {
     assert.equal(response.json.ok, true)
     assert.equal(model.calls.length, 1)
     assert.match(model.calls[0].system, /简体中文/)
+    assert.match(model.calls[0].system, /不要使用繁体中文/)
+    assert.doesNotMatch(model.calls[0].system, /繁體中文|個人網站/)
     assert.equal(model.calls[0].prompt.includes('单摆'), true)
+    assert.equal(model.calls[0].prompt.includes('單擺'), false)
     assert.ok(
         response.json.sources.some(
             (source) => source.url === '/zh-cn/pendulum'
         )
     )
+    assert.ok(
+        response.json.sources.length > 0 &&
+            response.json.sources.every((source) =>
+                source.url.startsWith('/zh-cn/')
+            )
+    )
+})
+
+test('Traditional Chinese uses its own UI language, sources, and answers', async () => {
+    const model = createModel('週期由擺長和重力決定。')
+    const service = createService({
+        docsRoot,
+        requestModel: model.requestModel,
+    })
+
+    const response = await callService(service, {
+        body: queryBody('單擺 週期', 'zh-TW'),
+    })
+
+    assert.equal(response.status, 200)
+    assert.equal(response.json.ok, true)
+    assert.equal(response.json.answer, '週期由擺長和重力決定。')
+    assert.equal(model.calls.length, 1)
+    assert.match(model.calls[0].system, /繁體中文/)
+    assert.match(model.calls[0].system, /不要使用簡體中文/)
+    assert.doesNotMatch(model.calls[0].system, /简体中文|个人网站/)
+    assert.equal(model.calls[0].prompt.includes('單擺'), true)
+    assert.equal(model.calls[0].prompt.includes('单摆'), false)
+    assert.ok(
+        response.json.sources.length > 0 &&
+            response.json.sources.every((source) =>
+                source.url.startsWith('/zh-tw/')
+            )
+    )
+    assert.ok(
+        response.json.sources.some(
+            (source) => source.url === '/zh-tw/pendulum'
+        )
+    )
+
+    // Traditional tags from browsers map to the same independent index.
+    const hant = await callService(service, {
+        body: queryBody('單擺 週期', 'zh-Hant'),
+    })
+    assert.equal(hant.status, 200)
+    assert.equal(hant.json.ok, true)
+    assert.equal(model.calls.length, 2)
+})
+
+test('returns Traditional Chinese errors for Traditional requests', async () => {
+    const model = createModel('should never be called')
+    const service = createService({
+        docsRoot,
+        requestModel: model.requestModel,
+    })
+
+    const noResults = await callService(service, {
+        body: queryBody('不存在詞彙xyz', 'zh-TW'),
+    })
+    assert.equal(noResults.status, 200)
+    assert.equal(noResults.json.code, 'no_results')
+    assert.match(noResults.json.message, /站內公開文件/)
+    assert.doesNotMatch(noResults.json.message, /站内公开文档/)
+    assert.equal(model.calls.length, 0)
+
+    const invalid = await callService(service, {
+        body: queryBody('\u0000abc', 'zh-TW'),
+    })
+    assert.equal(invalid.status, 400)
+    assert.equal(invalid.json.code, 'invalid_request')
+    assert.match(invalid.json.message, /AI 搜尋請求無效/)
+    assert.doesNotMatch(invalid.json.message, /AI 搜索请求无效/)
+
+    const unsupported = await callService(service, {
+        body: queryBody('單擺 週期', 'klingon'),
+    })
+    assert.equal(unsupported.status, 400)
+    assert.equal(unsupported.json.code, 'unsupported_language')
+    // Unknown languages deliberately keep the English default.
+    assert.match(unsupported.json.message, /not supported/)
+    assert.equal(model.calls.length, 0)
+
+    const failing = createService({
+        docsRoot,
+        requestModel: async () => {
+            throw new Error('provider secret')
+        },
+    })
+    const modelError = await callService(failing, {
+        body: queryBody('單擺 週期', 'zh-TW'),
+    })
+    assert.equal(modelError.status, 502)
+    assert.equal(modelError.json.code, 'model_error')
+    assert.match(modelError.json.message, /本機 AI 模型暫時無法產生回答/)
+    assert.doesNotMatch(modelError.rawBody, /provider secret|本機 AI 模型暂时/)
 })
 
 test('distinguishes model failure from no results and redacts errors', async () => {
@@ -1285,6 +1463,32 @@ test('validates method, content type, body size, encoding, and schema', async ()
     assert.equal(model.calls.length, 0)
 })
 
+test('maps public routes only inside the three locale directories', () => {
+    assert.equal(pageUrlFor('en/index.md'), '/en/')
+    assert.equal(pageUrlFor('en/physics.md'), '/en/physics')
+    assert.equal(pageUrlFor('en/Notes/demo.md'), '/en/Notes/demo')
+    assert.equal(pageUrlFor('zh-cn/index.md'), '/zh-cn/')
+    assert.equal(pageUrlFor('zh-cn/Notes/demo.md'), '/zh-cn/Notes/demo')
+    assert.equal(pageUrlFor('zh-tw/index.md'), '/zh-tw/')
+    assert.equal(pageUrlFor('zh-tw/Notes/demo.md'), '/zh-tw/Notes/demo')
+    assert.equal(
+        pageUrlFor('zh-tw/中文 页面.md'),
+        '/zh-tw/%E4%B8%AD%E6%96%87%20%E9%A1%B5%E9%9D%A2'
+    )
+
+    // The root language entry and files outside a locale directory are not
+    // part of any index and must not produce an unprefixed public URL.
+    for (const relativePath of [
+        'index.md',
+        'About/index.md',
+        'Notes/demo.md',
+        'en.txt',
+        'zh-cn',
+    ]) {
+        assert.equal(pageUrlFor(relativePath), null, relativePath)
+    }
+})
+
 test('validates Host headers and source paths', () => {
     assert.equal(parseAllowedHost('localhost'), 'localhost')
     assert.equal(parseAllowedHost('localhost:5173'), 'localhost:5173')
@@ -1297,7 +1501,14 @@ test('validates Host headers and source paths', () => {
     assert.equal(parseAllowedHost('evil.example'), null)
     assert.equal(parseAllowedHost('localhost:0'), null)
 
-    for (const pathname of ['/', '/About/', '/zh-cn/Notes/demo', '/a%20b']) {
+    for (const pathname of [
+        '/',
+        '/en/Notes/demo',
+        '/About/',
+        '/zh-cn/Notes/demo',
+        '/zh-tw/Notes/demo',
+        '/a%20b',
+    ]) {
         assert.equal(sanitizeSourcePath(pathname), pathname)
     }
     for (const pathname of [
@@ -2209,11 +2420,12 @@ test('production config compiles the client switch to false', async () => {
     })
 })
 
-test('uses the expected tokenizer for English and Chinese', () => {
+test('uses the expected tokenizer for English, Simplified, and Traditional', () => {
     assert.deepEqual(tokenize('What is the pendulum period?'), [
         'pendulum',
         'period',
     ])
     assert.deepEqual(tokenize('单摆 周期'), ['单摆', '周期'])
+    assert.deepEqual(tokenize('單擺 週期'), ['單擺', '週期'])
     assert.deepEqual(tokenize('the of and'), [])
 })

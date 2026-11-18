@@ -20,17 +20,22 @@ import {
 } from './check-bilingual.mjs'
 import {
   chineseDirName,
+  englishDirName,
   isPathInside,
   normalizeRelativePath,
   readmeChinese,
   readmeEnglish,
-  rootDocumentTargetName
+  readmeTraditional,
+  rootDocumentTargets,
+  traditionalDirName
 } from './document-mapping.mjs'
 import { translateFrontmatter } from './frontmatter-translate.mjs'
 import { assertNoPrivateContent, sanitizeMarkdownForModel, splitMarkdownDocument } from './markdown-privacy.mjs'
 import { translateBodyFragments } from './translate-body.mjs'
 import { assertSafeGeneratedMarkup } from './markdown-security.mjs'
+import { localeLinkIssues } from './locale-links.mjs'
 import { assertSafeDirectory, assertSafePath, resolveRealRoot } from './path-safety.mjs'
+import { convertMarkdownToTraditional } from './traditional-chinese.mjs'
 import {
   AI_MODEL_CONFIG_PATH,
   DEFAULT_TIMEOUT_MS,
@@ -86,9 +91,19 @@ export async function collectTranslationSources(rootDir = defaultRootDir) {
       sources.push({
         kind: 'docs',
         sourcePath: `docs/${chineseDirName}/${file}`,
-        targetPath: `docs/${file}`,
         sourceFsPath: path.join(docsDir, chineseDirName, file),
-        targetFsPath: path.join(docsDir, file)
+        targets: [
+          {
+            locale: englishDirName,
+            targetPath: `docs/${englishDirName}/${file}`,
+            targetFsPath: path.join(docsDir, englishDirName, file)
+          },
+          {
+            locale: traditionalDirName,
+            targetPath: `docs/${traditionalDirName}/${file}`,
+            targetFsPath: path.join(docsDir, traditionalDirName, file)
+          }
+        ]
       })
     }
   } catch (error) {
@@ -108,83 +123,139 @@ export async function collectTranslationSources(rootDir = defaultRootDir) {
 
   for (const entry of rootEntries) {
     if (!entry.isFile() || !entry.name.endsWith('.md')) continue
-    if (entry.name === readmeEnglish) continue
-
-    if (entry.name === readmeChinese) {
+    if (
+      entry.name === readmeEnglish ||
+      entry.name === readmeTraditional ||
+      entry.name === readmeChinese
+    ) {
+      if (entry.name !== readmeChinese) continue
       sources.push({
         kind: 'readme',
         sourcePath: readmeChinese,
-        targetPath: readmeEnglish,
         sourceFsPath: path.join(resolvedRoot, readmeChinese),
-        targetFsPath: path.join(resolvedRoot, readmeEnglish)
+        targets: [
+          {
+            locale: englishDirName,
+            targetPath: readmeEnglish,
+            targetFsPath: path.join(resolvedRoot, readmeEnglish)
+          },
+          {
+            locale: traditionalDirName,
+            targetPath: readmeTraditional,
+            targetFsPath: path.join(resolvedRoot, readmeTraditional)
+          }
+        ]
       })
       continue
     }
 
-    const targetName = rootDocumentTargetName(entry.name)
-    if (!targetName) continue
+    const targetNames = rootDocumentTargets(entry.name)
+    if (!targetNames) continue
     sources.push({
       kind: 'root',
       sourcePath: entry.name,
-      targetPath: targetName,
       sourceFsPath: path.join(resolvedRoot, entry.name),
-      targetFsPath: path.join(resolvedRoot, targetName)
+      targets: [
+        {
+          locale: englishDirName,
+          targetPath: targetNames[englishDirName],
+          targetFsPath: path.join(resolvedRoot, targetNames[englishDirName])
+        },
+        {
+          locale: traditionalDirName,
+          targetPath: targetNames[traditionalDirName],
+          targetFsPath: path.join(resolvedRoot, targetNames[traditionalDirName])
+        }
+      ]
     })
   }
 
   const seenTargets = new Map()
   const seenSources = new Map()
+  const validSources = []
   for (const source of sources) {
-    const targetKey = normalizeRelativePath(source.targetPath).toLowerCase()
     const sourceKey = normalizeRelativePath(source.sourcePath).toLowerCase()
-    if (!isPathInside(resolvedRoot, source.sourceFsPath) || !isPathInside(resolvedRoot, source.targetFsPath)) {
-      errors.push(`映射越出仓库目录：${source.sourcePath} → ${source.targetPath}`)
-      continue
-    }
-    if (seenTargets.has(targetKey)) {
-      errors.push(`多个中文源映射到同一英文目标：${source.sourcePath} 与 ${seenTargets.get(targetKey)} → ${source.targetPath}`)
-      continue
-    }
     if (seenSources.has(sourceKey)) {
       errors.push(`同一中文源出现多次：${source.sourcePath}`)
       continue
     }
-    seenTargets.set(targetKey, source.sourcePath)
     seenSources.set(sourceKey, source.sourcePath)
+
+    let valid = true
+    if (!isPathInside(resolvedRoot, source.sourceFsPath)) {
+      errors.push(`中文源越出仓库目录：${source.sourcePath}`)
+      valid = false
+    }
+    for (const target of source.targets) {
+      const targetKey = normalizeRelativePath(target.targetPath).toLowerCase()
+      if (!isPathInside(resolvedRoot, target.targetFsPath)) {
+        errors.push(`目标越出仓库目录：${source.sourcePath} → ${target.targetPath}`)
+        valid = false
+        continue
+      }
+      if (seenTargets.has(targetKey)) {
+        errors.push(
+          `多个中文源映射到同一目标：${source.sourcePath} 与 ` +
+          `${seenTargets.get(targetKey)} → ${target.targetPath}`
+        )
+        valid = false
+        continue
+      }
+      seenTargets.set(targetKey, source.sourcePath)
+    }
+    if (valid) validSources.push(source)
   }
 
-  sources.sort((left, right) =>
+  validSources.sort((left, right) =>
     left.sourcePath < right.sourcePath ? -1 : left.sourcePath > right.sourcePath ? 1 : 0
   )
-  if (sources.length === 0 && errors.length === 0) {
+  if (validSources.length === 0 && errors.length === 0) {
     errors.push('没有找到任何中文 Markdown 源文件')
   }
 
-  return { rootDir: resolvedRoot, sources, errors }
+  return { rootDir: resolvedRoot, sources: validSources, errors }
 }
 
 async function planTranslations(collection) {
   const items = []
   const errors = [...collection.errors]
   for (const source of collection.sources) {
-    const target = await pathKind(source.targetFsPath)
-    if (target.kind === 'symlink') {
-      errors.push(`${source.targetPath} 是符号链接；拒绝覆盖仓库外文件`)
-      items.push({ ...source, status: 'symlink' })
-    } else if (target.kind === 'other') {
-      errors.push(`${source.targetPath} 不是普通文件；拒绝覆盖`)
-      items.push({ ...source, status: 'other' })
-    } else {
-      items.push({ ...source, status: target.kind === 'missing' ? 'missing' : 'exists' })
+    const targets = []
+    for (const target of source.targets) {
+      const kind = await pathKind(target.targetFsPath)
+      if (kind.kind === 'symlink') {
+        errors.push(`${target.targetPath} 是符号链接；拒绝覆盖仓库外文件`)
+      } else if (kind.kind === 'other') {
+        errors.push(`${target.targetPath} 不是普通文件；拒绝覆盖`)
+      }
+      targets.push({
+        ...target,
+        status: kind.kind === 'file'
+          ? 'exists'
+          : ['missing', 'symlink', 'other'].includes(kind.kind)
+            ? kind.kind
+            : 'other'
+      })
     }
+    items.push({ ...source, targets })
   }
   return { items, errors }
 }
 
-export async function translateSource({ sourcePath, targetPath, sourceText, requestModel, md }) {
+export async function translateSource({
+  sourcePath,
+  targetPath,
+  sourceText,
+  requestModel,
+  md,
+  targetLocale = englishDirName
+}) {
   if (typeof sourceText !== 'string') throw new TypeError('源文件内容必须是字符串')
   if (typeof requestModel !== 'function') throw new TypeError('翻译需要 requestModel')
   if (!md) throw new TypeError('翻译需要 Markdown 解析器')
+  if (targetLocale !== englishDirName) {
+    throw new Error('模型翻译当前只生成英文目标；繁体目标使用本机 OpenCC 转换')
+  }
 
   let sanitized
   try {
@@ -192,13 +263,18 @@ export async function translateSource({ sourcePath, targetPath, sourceText, requ
   } catch (error) {
     throw new Error(`无法安全移除私有内容：${truncateError(error)}`)
   }
+  const sourceLinkErrors = localeLinkIssues(sanitized, chineseDirName, sourcePath)
+  if (sourceLinkErrors.length > 0) {
+    throw new Error(`中文源站内链接不符合语言前缀约定：\n${sourceLinkErrors.join('\n')}`)
+  }
 
   const document = splitMarkdownDocument(sanitized)
   let frontmatter = null
   if (document.frontmatter !== null) {
     frontmatter = await translateFrontmatter(document.frontmatter, {
       requestModel,
-      sourcePath
+      sourcePath,
+      targetLocale
     })
   }
 
@@ -223,7 +299,8 @@ export async function translateSource({ sourcePath, targetPath, sourceText, requ
     targetPath,
     sourcePath,
     analyzeMarkdown(english, md),
-    analyzeMarkdown(sanitized, md)
+    analyzeMarkdown(sanitized, md),
+    { leftLabel: 'English', rightLabel: 'Simplified Chinese' }
   )
   if (structureErrors.length > 0) {
     throw new Error(`Markdown 结构校验失败：\n${structureErrors.join('\n')}`)
@@ -231,16 +308,43 @@ export async function translateSource({ sourcePath, targetPath, sourceText, requ
 
   const verdict = await runSemanticReview({
     file: `${targetPath} vs ${sourcePath}`,
-    english,
-    chinese: sanitized,
+    source: sanitized,
+    target: english,
+    sourceLabel: 'Simplified Chinese',
+    targetLabel: 'English',
     requestModel,
     md
   })
   if (!verdict.equivalent) {
-    throw new Error(`双语语义校验失败：\n${verdict.issues.map((issue) => `- ${issue}`).join('\n')}`)
+    throw new Error(`三语语义校验失败：\n${verdict.issues.map((issue) => `- ${issue}`).join('\n')}`)
   }
 
   return english
+}
+
+export async function translateTraditionalSource({
+  sourcePath,
+  targetPath,
+  sourceText,
+  md
+}) {
+  const sanitized = sanitizeMarkdownForModel(sourceText)
+  const sourceLinkErrors = localeLinkIssues(sanitized, chineseDirName, sourcePath)
+  if (sourceLinkErrors.length > 0) {
+    throw new Error(`中文源站内链接不符合语言前缀约定：\n${sourceLinkErrors.join('\n')}`)
+  }
+  const traditional = await convertMarkdownToTraditional(sourceText, { md, sourcePath, targetPath })
+  const structureErrors = compareStructures(
+    targetPath,
+    sourcePath,
+    analyzeMarkdown(traditional, md),
+    analyzeMarkdown(sanitized, md),
+    { leftLabel: 'Traditional Chinese', rightLabel: 'Simplified Chinese' }
+  )
+  if (structureErrors.length > 0) {
+    throw new Error(`Markdown 结构校验失败：\n${structureErrors.join('\n')}`)
+  }
+  return traditional
 }
 
 async function snapshotTarget(targetFsPath) {
@@ -305,7 +409,7 @@ export async function writeTranslationsAtomically({ rootDir, writes, fs = {} }) 
     const safeTarget = await assertSafePath(resolvedRoot, write.targetFsPath, {
       allowMissing: true,
       requireFile: false,
-      label: '英文目标',
+      label: '目标',
       fs: operations
     })
     write.targetFsPath = safeTarget
@@ -323,15 +427,15 @@ export async function writeTranslationsAtomically({ rootDir, writes, fs = {} }) 
       await assertSafePath(resolvedRoot, safeTarget, {
         allowMissing: false,
         requireFile: true,
-        label: '英文目标',
+        label: '目标',
         fs: operations
       })
       const content = await operations.readFile(safeTarget, 'utf8')
       if (content !== write.original.content) {
-        throw new Error(`${write.targetPath} 在生成期间被修改，已中止以避免覆盖人工英文`)
+        throw new Error(`${write.targetPath} 在生成期间被修改，已中止以避免覆盖人工内容`)
       }
     } else if (current.kind !== 'missing') {
-      throw new Error(`${write.targetPath} 在生成期间被创建，已中止以避免覆盖已有英文`)
+      throw new Error(`${write.targetPath} 在生成期间被创建，已中止以避免覆盖已有内容`)
     }
     return safeTarget
   }
@@ -340,7 +444,7 @@ export async function writeTranslationsAtomically({ rootDir, writes, fs = {} }) 
     write.targetFsPath = await assertSafePath(resolvedRoot, write.targetFsPath, {
       allowMissing: true,
       requireFile: false,
-      label: '英文目标',
+      label: '目标',
       fs: operations
     })
   }
@@ -396,7 +500,7 @@ export async function writeTranslationsAtomically({ rootDir, writes, fs = {} }) 
         committed.push(write)
         const after = await pathKindWith(operations, finalTarget)
         if (after.kind !== 'file' || await operations.readFile(finalTarget, 'utf8') !== write.content) {
-          throw new Error(`${write.targetPath} 提交后内容不是生成的英文，已中止`)
+          throw new Error(`${write.targetPath} 提交后内容不是生成结果，已中止`)
         }
       } else {
         try {
@@ -424,7 +528,7 @@ export async function writeTranslationsAtomically({ rootDir, writes, fs = {} }) 
         const safeTarget = await assertSafePath(resolvedRoot, write.targetFsPath, {
           allowMissing: true,
           requireFile: false,
-          label: '英文目标',
+          label: '目标',
           fs: operations
         })
         const current = await pathKindWith(operations, safeTarget)
@@ -536,7 +640,7 @@ export async function writeTranslationsAtomically({ rootDir, writes, fs = {} }) 
         const safeTarget = await assertSafePath(resolvedRoot, owner.targetFsPath, {
           allowMissing: true,
           requireFile: false,
-          label: '英文目标',
+          label: '目标',
           fs: operations
         })
         const current = await pathKindWith(operations, safeTarget)
@@ -575,8 +679,25 @@ async function pathKindWith(operations, targetPath) {
   }
 }
 
+const targetLocales = [englishDirName, traditionalDirName]
+
+function parseTargetLocale(value) {
+  if (!targetLocales.includes(value)) {
+    throw new Error(`--lang 只支持 ${targetLocales.join('、')}`)
+  }
+  return value
+}
+
 function parseCliArgs(argv = []) {
-  const options = { write: false, force: false, only: [], timeoutMs: undefined, root: undefined, help: false }
+  const options = {
+    write: false,
+    force: false,
+    only: [],
+    langs: [],
+    timeoutMs: undefined,
+    root: undefined,
+    help: false
+  }
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index]
     if (argument === '--help' || argument === '-h') {
@@ -587,13 +708,20 @@ function parseCliArgs(argv = []) {
       options.force = true
     } else if (argument === '--only') {
       const value = argv[index + 1]
-      if (!value) throw new Error('--only 需要一个中文源或英文目标路径')
+      if (!value) throw new Error('--only 需要一个中文源或目标路径')
       options.only.push(normalizeRelativePath(value))
       index += 1
     } else if (argument.startsWith('--only=')) {
       const value = argument.slice('--only='.length)
-      if (!value) throw new Error('--only 需要一个中文源或英文目标路径')
+      if (!value) throw new Error('--only 需要一个中文源或目标路径')
       options.only.push(normalizeRelativePath(value))
+    } else if (argument === '--lang') {
+      const value = argv[index + 1]
+      if (!value) throw new Error('--lang 需要一个目标语言')
+      options.langs.push(parseTargetLocale(value))
+      index += 1
+    } else if (argument.startsWith('--lang=')) {
+      options.langs.push(parseTargetLocale(argument.slice('--lang='.length)))
     } else if (argument === '--root') {
       const value = argv[index + 1]
       if (!value) throw new Error('--root 需要一个目录')
@@ -623,51 +751,58 @@ function parseCliArgs(argv = []) {
   if (options.force && !options.write) {
     throw new Error('--force 必须与 --write 一起使用，避免误以为已写入')
   }
+  options.langs = [...new Set(options.langs)]
   return options
 }
 
 function helpText() {
   return `用法：
-  pnpm translate:docs                       查看中文源 → 英文目标映射（不调用模型）
-  pnpm translate:docs -- --write            生成缺失的英文页面；全批验证通过后才写入
-  pnpm translate:docs -- --write --force    重新生成并覆盖已有英文页面（危险，需明确选择）
-  pnpm check:bilingual                      对全部页面和界面文案做结构及语义检查
+  pnpm translate:docs                       查看简中源 → 英文/繁体目标映射（不调用模型）
+  pnpm translate:docs -- --write            生成缺失的英文与繁体页面；全批验证通过后才写入
+  pnpm translate:docs -- --write --force    重新生成并覆盖已有英文与繁体页面（危险，需明确选择）
+  pnpm check:bilingual                      对三语页面、根文档和界面文案做结构、链接及语义检查
 
 选项：
-  --write              写入英文页面；默认只显示映射，不写文件
-  --force              允许覆盖已存在的英文页面；必须同时使用 --write
-  --only <路径>        只处理指定中文源或英文目标，可重复
+  --write              写入目标页面；默认只显示映射，不写文件
+  --force              允许覆盖已存在的目标页面；必须同时使用 --write
+  --only <路径>        只处理指定中文源或目标路径，可重复
+  --lang <语言>        只处理 en 或 zh-tw，可重复；默认两种都处理
   --root <目录>        在隔离目录中运行（用于临时副本或单对文件的真实模型验证）
   --timeout <毫秒>     单次模型请求超时，默认 ${DEFAULT_TIMEOUT_MS}
   --help               显示本帮助
 
-模型：
-  通过本机私有配置 ${AI_MODEL_CONFIG_PATH}（YAML；已被 .gitignore 忽略）调用
+模型与本地依赖：
+  英文通过本机私有配置 ${AI_MODEL_CONFIG_PATH}（YAML；已被 .gitignore 忽略）调用
   OpenAI-compatible chat completions 端点；模型与端点来自该配置，密钥不会输出。
   可用 AI_MODEL_CONFIG、AI_MODEL、AI_REQUEST_TIMEOUT_MS 覆盖；不需要 OMP 程序或登录。
   所有中文源先移除 HTML 注释与显式私有块，再发送给模型。
-  Mermaid 图中读者可见的中文节点、连线、标题标签会单独翻译；图类型、节点 ID、
-  连接结构、样式和普通程序代码逐字保留；无法安全识别的中文 Mermaid 语法会失败。
+  繁体由本机 opencc-js（OpenCC cn→twp）确定性转换，不联网、不调用模型。
+  代码、公式、URL、HTML 标签和 Mermaid 图结构逐字保留；读者可见的 Mermaid
+  标签单独转换。结构、安全标记和受保护内容在写入前再次校验。
 `
 }
 
 function matchesOnly(item, only) {
   return only.some((value) =>
     normalizeRelativePath(item.sourcePath) === value ||
-    normalizeRelativePath(item.targetPath) === value
+    item.targets.some((target) => normalizeRelativePath(target.targetPath) === value)
   )
 }
 
-function printPlan(items, errors, log, errorLog) {
-  log('中文源 → 英文目标映射：')
+function printPlan(items, errors, log, errorLog, langs = []) {
+  const wanted = langs.length > 0 ? new Set(langs) : null
+  log('简中源 → 英文/繁体目标映射：')
   for (const item of items) {
-    const status = item.status === 'missing'
-      ? '缺失  '
-      : item.status === 'exists'
-        ? '已存在'
-        : '出错  '
-    const note = item.status === 'exists' ? '（默认跳过；--write --force 才覆盖）' : ''
-    log(`  ${status} ${item.targetPath}  ←  ${item.sourcePath}${note}`)
+    for (const target of item.targets) {
+      if (wanted && !wanted.has(target.locale)) continue
+      const status = target.status === 'missing'
+        ? '缺失  '
+        : target.status === 'exists'
+          ? '已存在'
+          : '出错  '
+      const note = target.status === 'exists' ? '（默认跳过；--write --force 才覆盖）' : ''
+      log(`  ${status} ${target.targetPath}  ←  ${item.sourcePath}${note}`)
+    }
   }
   if (errors.length > 0) {
     errorLog(`映射错误（${errors.length}）：`)
@@ -718,48 +853,67 @@ export async function main(argv = [], options = {}) {
   try {
     planned = await planTranslations(collection)
   } catch (error) {
-    errorLog(`无法检查英文目标文件：${truncateError(error)}`)
+    errorLog(`无法检查目标文件：${truncateError(error)}`)
     errorLog('已中止；未写入任何文件。')
     return 1
   }
-  const items = parsed.only.length > 0
+
+  const selectedLangs = parsed.langs.length > 0 ? parsed.langs : targetLocales
+  const selectedTargets = (item) => {
+    const bySource = parsed.only.length === 0 || parsed.only.some((value) =>
+      normalizeRelativePath(item.sourcePath) === value
+    )
+    return item.targets.filter((target) =>
+      selectedLangs.includes(target.locale) &&
+      (
+        bySource ||
+        parsed.only.some((value) => normalizeRelativePath(target.targetPath) === value)
+      )
+    )
+  }
+
+  const items = (parsed.only.length > 0
     ? planned.items.filter((item) => matchesOnly(item, parsed.only))
-    : planned.items
+    : planned.items)
+    .map((item) => ({ ...item, targets: selectedTargets(item) }))
+    .filter((item) => item.targets.length > 0)
   if (parsed.only.length > 0 && items.length === 0) {
-    errorLog(`--only 未匹配任何中文源或英文目标：${parsed.only.join(', ')}`)
+    errorLog(`--only 未匹配任何中文源或目标：${parsed.only.join(', ')}`)
     return 2
   }
 
   const errors = planned.errors
   if (!parsed.write) {
-    printPlan(items, errors, log, errorLog)
+    printPlan(items, errors, log, errorLog, selectedLangs)
     if (errors.length > 0) return 1
-    const missing = items.filter((item) => item.status === 'missing').length
-    const existing = items.filter((item) => item.status === 'exists').length
+    const targets = items.flatMap((item) => item.targets)
+    const missing = targets.filter((target) => target.status === 'missing').length
+    const existing = targets.filter((target) => target.status === 'exists').length
     log(
-      `共 ${items.length} 项：缺失 ${missing}，已存在 ${existing}。` +
+      `共 ${targets.length} 个目标：缺失 ${missing}，已存在 ${existing}。` +
       '未写入任何文件。运行 pnpm translate:docs -- --write 生成缺失页面。'
     )
     return 0
   }
 
   if (errors.length > 0) {
-    printPlan(items, errors, log, errorLog)
+    printPlan(items, errors, log, errorLog, selectedLangs)
     errorLog('存在映射错误，已中止；未写入任何文件。')
     return 1
   }
 
-  const candidates = items.filter((item) =>
-    item.status === 'missing' || (parsed.force && item.status === 'exists')
-  )
-  const skipped = items.filter((item) => !candidates.includes(item))
-  if (skipped.length > 0) {
-    for (const item of skipped) {
-      log(`跳过已有英文（未使用 --force）：${item.targetPath}  ←  ${item.sourcePath}`)
+  const candidates = []
+  for (const item of items) {
+    for (const target of item.targets) {
+      if (target.status === 'missing' || (parsed.force && target.status === 'exists')) {
+        candidates.push({ item, target })
+      } else if (target.status === 'exists') {
+        log(`跳过已有目标（未使用 --force）：${target.targetPath}  ←  ${item.sourcePath}`)
+      }
     }
   }
   if (candidates.length === 0) {
-    log('没有需要生成的英文页面。')
+    log('没有需要生成的目标页面。')
     return 0
   }
 
@@ -772,64 +926,87 @@ export async function main(argv = [], options = {}) {
   }
 
   const writes = []
-  for (const item of candidates) {
-    log(`正在生成：${item.targetPath}  ←  ${item.sourcePath}`)
+  const candidatesByItem = new Map()
+  for (const candidate of candidates) {
+    if (!candidatesByItem.has(candidate.item)) candidatesByItem.set(candidate.item, [])
+    candidatesByItem.get(candidate.item).push(candidate.target)
+  }
+
+  for (const [item, itemTargets] of candidatesByItem) {
     let sourceText
-    let original
-    let safeTarget
     try {
       const safeSource = await assertSafePath(rootDir, item.sourceFsPath, {
         allowMissing: false,
         requireFile: true,
         label: '中文源'
       })
-      safeTarget = await assertSafePath(rootDir, item.targetFsPath, {
-        allowMissing: true,
-        requireFile: true,
-        label: '英文目标'
-      })
       sourceText = await readFile(safeSource, 'utf8')
       // Re-check after the read so a path component swapped during the I/O is
-      // not silently used for the model call.
+      // not silently used for model or conversion input.
       await assertSafePath(rootDir, safeSource, {
         allowMissing: false,
         requireFile: true,
         label: '中文源'
       })
-      original = await snapshotTarget(safeTarget)
-      if (item.status === 'missing' && original.exists) {
-        errorLog(
-          `${item.targetPath} 在生成前已出现；为避免覆盖人工英文，已中止且未写入任何文件。`
-        )
-        return 1
-      }
     } catch (error) {
       errorLog(`读取失败：${item.sourcePath}：${truncateError(error)}`)
       errorLog('已中止；未写入任何文件。')
       return 1
     }
 
-    try {
-      const english = await translateSource({
-        sourcePath: item.sourcePath,
-        targetPath: item.targetPath,
-        sourceText,
-        requestModel: (request) => requestModel({
-          ...request,
-          timeoutMs: parsed.timeoutMs ?? request.timeoutMs
-        }),
-        md
-      })
-      writes.push({
-        targetPath: item.targetPath,
-        targetFsPath: safeTarget,
-        content: english,
-        original
-      })
-    } catch (error) {
-      errorLog(`生成失败：${item.targetPath}：${truncateError(error)}`)
-      errorLog('已中止；此前生成的结果全部丢弃，未写入任何文件。')
-      return 1
+    for (const target of itemTargets) {
+      log(`正在生成（${target.locale}）：${target.targetPath}  ←  ${item.sourcePath}`)
+      let original
+      let safeTarget
+      try {
+        safeTarget = await assertSafePath(rootDir, target.targetFsPath, {
+          allowMissing: true,
+          requireFile: true,
+          label: '目标'
+        })
+        original = await snapshotTarget(safeTarget)
+        if (target.status === 'missing' && original.exists) {
+          errorLog(
+            `${target.targetPath} 在生成前已出现；为避免覆盖人工内容，已中止且未写入任何文件。`
+          )
+          return 1
+        }
+      } catch (error) {
+        errorLog(`读取失败：${target.targetPath}：${truncateError(error)}`)
+        errorLog('已中止；未写入任何文件。')
+        return 1
+      }
+
+      try {
+        const content = target.locale === traditionalDirName
+          ? await translateTraditionalSource({
+              sourcePath: item.sourcePath,
+              targetPath: target.targetPath,
+              sourceText,
+              md
+            })
+          : await translateSource({
+              sourcePath: item.sourcePath,
+              targetPath: target.targetPath,
+              sourceText,
+              targetLocale: target.locale,
+              requestModel: (request) => requestModel({
+                ...request,
+                timeoutMs: parsed.timeoutMs ?? request.timeoutMs
+              }),
+              md
+            })
+        writes.push({
+          targetPath: target.targetPath,
+          targetFsPath: safeTarget,
+          content,
+          original
+        })
+      } catch (error) {
+        errorLog(`生成失败：${target.targetPath}：${truncateError(error)}`)
+        errorLog('已中止；此前生成的结果全部丢弃，未写入任何文件。')
+        return 1
+      }
     }
   }
 
@@ -841,7 +1018,9 @@ export async function main(argv = [], options = {}) {
   }
 
   for (const write of writes) log(`已写入：${write.targetPath}`)
-  log(`完成：写入 ${writes.length} 个英文页面；全部页面均通过结构校验和语义校验。`)
+  log(
+    `完成：写入 ${writes.length} 个目标页面；全部页面均通过结构、安全与目标语言校验。`
+  )
   return 0
 }
 

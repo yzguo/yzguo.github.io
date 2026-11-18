@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
-import { useData, useRoute } from 'vitepress'
+import { useRoute } from 'vitepress'
 
 interface AiSource {
     title: string
@@ -31,8 +31,24 @@ const AI_SEARCH_PATH = '/__ai-search'
 // explicit error at 300 seconds. Keep AI_REQUEST_TIMEOUT_MS below this bound.
 const REQUEST_TIMEOUT_MS = 900_000
 
-const { lang } = useData()
 const route = useRoute()
+
+/**
+ * The public locale is defined by the route prefix, not by the browser or the
+ * document language. `/zh-tw/` is Traditional Chinese, `/zh-cn/` is Simplified
+ * Chinese, and every other path (including `/`, `/en/`, and unknown
+ * languages) uses the English interface and English model answers.
+ */
+function localeForPath(path: string): 'en' | 'zh-cn' | 'zh-tw' {
+    const normalized = path.toLowerCase()
+    if (normalized === '/zh-tw' || normalized.startsWith('/zh-tw/')) {
+        return 'zh-tw'
+    }
+    if (normalized === '/zh-cn' || normalized.startsWith('/zh-cn/')) {
+        return 'zh-cn'
+    }
+    return 'en'
+}
 
 const isOpen = ref(false)
 const query = ref('')
@@ -48,12 +64,36 @@ let previousFocus: HTMLElement | null = null
 let previousOverflow = ''
 let timeoutHandle: ReturnType<typeof setTimeout> | undefined
 
-const isChinese = computed(() => lang.value.toLowerCase().startsWith('zh'))
+const searchLocale = computed(() => localeForPath(route.path))
 const titleId = 'local-ai-search-title-' + useId().replace(/[^a-zA-Z0-9-]/g, '')
 const inputId = 'local-ai-search-query-' + useId().replace(/[^a-zA-Z0-9-]/g, '')
 
 const labels = computed(() => {
-    if (isChinese.value) {
+    if (searchLocale.value === 'zh-tw') {
+        return {
+            trigger: 'AI 搜尋',
+            triggerMark: 'AI',
+            triggerText: '搜尋',
+            title: '用 AI 搜尋本站',
+            close: '關閉',
+            inputLabel: '問題',
+            placeholder: '詢問本站的公開文件…',
+            ask: '提問',
+            asking: '思考中…',
+            cancel: '取消',
+            note: 'AI 搜尋僅在本機開發伺服器啟用。問題與選取的公開頁面摘錄只會傳送到本機設定的 AI 模型；線上靜態網站不提供此功能。',
+            loading: '正在檢索站內公開文件並請求本機 AI 模型…',
+            noResults: '沒有找到符合的公開頁面。可以試試原有的搜尋（Ctrl/Cmd+K）。',
+            modelError: '本機 AI 模型暫時無法回答。原有的搜尋仍然可用。',
+            busy: '本機 AI 模型正在回答另一個問題，請稍後再試。原有的搜尋仍然可用。',
+            requestError: '無法連線到本機 AI 搜尋。原有的搜尋仍然可用。',
+            timeout: 'AI 模型回應逾時。原有的搜尋仍然可用。',
+            cancelled: '已取消 AI 回答請求。',
+            sources: '來源',
+        }
+    }
+
+    if (searchLocale.value === 'zh-cn') {
         return {
             trigger: 'AI 搜索',
             triggerMark: 'AI',
@@ -231,9 +271,9 @@ async function ask() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 query: question,
-                // The server canonicalises these two languages. Sending the
-                // short tag keeps the whitelist intentionally small.
-                lang: isChinese.value ? 'zh' : 'en',
+                // The route prefix selects one of three independent indexes.
+                // English and every other language stay English.
+                lang: searchLocale.value,
             }),
             credentials: 'same-origin',
             cache: 'no-store',

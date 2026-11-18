@@ -5,6 +5,7 @@ import { shared } from './shared.ts'
 import { headConfig } from './head.ts'
 import { en_us } from './en-us.ts'
 import { zh_cn } from './zh-cn.ts'
+import { zh_tw } from './zh-tw.ts'
 import {
     assertPrivateModelConfigPlacement,
     readAiSearchConfig,
@@ -132,9 +133,17 @@ export default defineConfig({
             }
         }
     },
+    /*
+     * The three real languages live under their own directory and URL prefix.
+     * There is deliberately no `root` language entry: `/` is the entry page
+     * (docs/index.md), not a fourth language. VitePress therefore builds
+     * docs/en as /en/, docs/zh-cn as /zh-cn/, and docs/zh-tw as /zh-tw/,
+     * and the language menu lists exactly the three labels below.
+     */
     locales: {
-        root: { label: 'English', ...en_us },
+        "en": { label: 'English', ...en_us },
         "zh-cn": { label: '简体中文', ...zh_cn },
+        "zh-tw": { label: '繁體中文', ...zh_tw },
     },
     vite: {
         plugins: [aiSearchPlugin()],

@@ -1,5 +1,10 @@
 import { randomBytes } from 'node:crypto'
-import { hasCjk, localizeInternalHref } from './document-mapping.mjs'
+import {
+  englishDirName,
+  hasCjk,
+  localizeInternalHref,
+  traditionalDirName
+} from './document-mapping.mjs'
 
 const systemPrompt = `You translate user-visible Chinese interface text into concise, natural English.
 Return only a JSON array of exactly the requested number of strings, in the original order.
@@ -89,7 +94,10 @@ function parseQuotedValue(raw) {
 }
 
 function plainScalarNeedsQuotes(value) {
-  if (!/^[A-Za-z0-9]/.test(value)) return true
+  // YAML plain scalars may start with any non-ASCII letter. Keeping CJK values
+  // unquoted preserves the source style while the extra checks below still
+  // quote anything that could be misread as YAML syntax.
+  if (!/^[A-Za-z0-9\u0080-\uFFFF]/u.test(value)) return true
   if (/[\r\n\t]/.test(value)) return true
   if (/: | #|:$/.test(value)) return true
   if (/^(?:true|false|null|yes|no|on|off|~)$/i.test(value)) return true
@@ -230,7 +238,7 @@ export function parseFrontmatterScalars(frontmatter) {
       key: parsed.key,
       valueStart: parsed.prefix.length,
       valueEnd: parsed.prefix.length + valueLength,
-      localize: value.startsWith('/zh-cn') || value === '/zh-cn'
+      localize: isLocaleLinkValue(value)
     })
   }
 
@@ -274,11 +282,16 @@ function isPathLikeValue(value) {
   return /^(?:[A-Za-z][A-Za-z0-9+.-]*:|\/|\.{1,2}\/|#)/.test(value)
 }
 
+function isLocaleLinkValue(value) {
+  return value === '/' || /^\/(?:en|zh-cn|zh-tw)(?=$|[/?#])/i.test(value)
+}
+
 export async function translateFrontmatter(frontmatter, options = {}) {
   if (typeof frontmatter !== 'string') throw new TypeError('frontmatter 必须是字符串')
   const requestModel = options.requestModel
   if (typeof requestModel !== 'function') throw new TypeError('translateFrontmatter 需要 requestModel')
   const sourcePath = options.sourcePath ?? '(unknown)'
+  const targetLocale = options.targetLocale ?? englishDirName
 
   const unsupported = collectUnsupported(frontmatter)
   if (unsupported.length > 0) throw new Error(unsupported.join('；'))
@@ -336,7 +349,7 @@ export async function translateFrontmatter(frontmatter, options = {}) {
     } else if (record.localize) {
       byLine.set(record.line, {
         record,
-        value: localizeInternalHref(record.value)
+        value: localizeInternalHref(record.value, targetLocale)
       })
     }
   }
@@ -350,4 +363,54 @@ export async function translateFrontmatter(frontmatter, options = {}) {
   })
 
   return output.join('')
+}
+
+// Deterministic locale conversion for user-visible frontmatter values. YAML
+// keys, paths, URLs, and unsupported multiline/flow constructs are never
+// rewritten; values that OpenCC would change are converted, and internal
+// locale links are repointed at the target locale.
+export function convertFrontmatter(frontmatter, options = {}) {
+  if (typeof frontmatter !== 'string') throw new TypeError('frontmatter 必须是字符串')
+  const convertText = options.convertText
+  if (typeof convertText !== 'function') {
+    throw new TypeError('convertFrontmatter 需要 convertText')
+  }
+  const targetLocale = options.targetLocale ?? traditionalDirName
+
+  const unsupported = collectUnsupported(frontmatter)
+  if (unsupported.length > 0) throw new Error(unsupported.join('；'))
+
+  const { lines, records } = parseFrontmatterScalars(frontmatter)
+  const parseErrors = records.filter((record) => record.error)
+  if (parseErrors.length > 0) {
+    throw new Error(parseErrors.map((record) => `第 ${record.line} 行：${record.error}`).join('；'))
+  }
+
+  const byLine = new Map()
+  for (const record of records) {
+    if (record.localize) {
+      byLine.set(record.line, {
+        record,
+        value: localizeInternalHref(record.value, targetLocale)
+      })
+      continue
+    }
+    if (!hasCjk(record.value) || isPathLikeValue(record.value)) continue
+    const converted = convertText(record.value)
+    if (typeof converted !== 'string' || converted.trim() === '') {
+      throw new Error(`第 ${record.line + 1} 行的前置元数据转换结果为空`)
+    }
+    if (converted.includes('<!--') || /private\s*:/.test(converted)) {
+      throw new Error('前置元数据转换结果包含私有内容标记，已拒绝写入')
+    }
+    byLine.set(record.line, { record, value: converted })
+  }
+
+  return lines.map((line, index) => {
+    const replacement = byLine.get(index)
+    if (!replacement) return line
+    const { record, value } = replacement
+    const encoded = encodeValue(value, record.quote)
+    return `${record.content.slice(0, record.valueStart)}${encoded}${record.content.slice(record.valueEnd)}${record.ending}`
+  }).join('')
 }

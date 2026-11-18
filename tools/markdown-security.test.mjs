@@ -2,10 +2,15 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { assertSafeGeneratedMarkup } from './markdown-security.mjs'
 
-test('localized original links and tags remain allowed', async () => {
+test('localized original links and tags remain allowed in every locale', async () => {
   await assert.doesNotReject(() => assertSafeGeneratedMarkup(
     '# 标题\n\n[链接](/zh-cn/A) <a href="/zh-cn/A">A</a>',
-    '# Title\n\n[Link](/A) <a href="/A">A</a>',
+    '# Title\n\n[Link](/en/A) <a href="/en/A">A</a>',
+    'page'
+  ))
+  await assert.doesNotReject(() => assertSafeGeneratedMarkup(
+    '# 标题\n\n[链接](/zh-cn/A) <a href="/zh-cn/A">A</a>',
+    '# 標題\n\n[連結](/zh-tw/A) <a href="/zh-tw/A">A</a>',
     'page'
   ))
   await assert.doesNotReject(() =>

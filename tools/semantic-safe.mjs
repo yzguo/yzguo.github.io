@@ -1,4 +1,4 @@
-import { localizeInternalHref } from './document-mapping.mjs'
+import { canonicalInternalHref } from './document-mapping.mjs'
 import { maskMarkdown } from './markdown-protect.mjs'
 import { splitMarkdownDocument } from './markdown-privacy.mjs'
 import { getMermaidSemanticData } from './mermaid-translate.mjs'
@@ -51,7 +51,7 @@ function normalizeTarget(value) {
   let target = String(value).trim()
   if (target.startsWith('<') && target.endsWith('>')) target = target.slice(1, -1)
   if (!target) return target
-  return localizeInternalHref(target)
+  return canonicalInternalHref(target)
 }
 
 function addUniqueUrl(features, value) {
@@ -381,7 +381,8 @@ export async function projectSemanticText(text, options = {}) {
   const bodyWithBlocks = replaceProtectedBlocks(document.body, tokens, features)
   const masked = maskMarkdown(bodyWithBlocks, {
     protectBareUrls: true,
-    failOnUnsafeHtml: true
+    failOnUnsafeHtml: true,
+    targetLocale: 'canonical'
   })
   const projectedBody = applyMaskedTokens(masked.text, masked.tokens, features)
   const safeBody = maskResidualUrls(projectedBody, features)

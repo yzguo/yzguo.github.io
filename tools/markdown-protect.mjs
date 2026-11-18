@@ -1,5 +1,9 @@
 import { randomBytes } from 'node:crypto'
-import { localizeInternalHref } from './document-mapping.mjs'
+import {
+  canonicalInternalHref,
+  englishDirName,
+  localizeInternalHref
+} from './document-mapping.mjs'
 import { PrivacyError } from './markdown-privacy.mjs'
 
 function lineEndAt(text, start) {
@@ -32,36 +36,42 @@ function findBalanced(text, start, open, close) {
   return -1
 }
 
-function localizeDestination(destination) {
-  if (destination.startsWith('<') && destination.endsWith('>')) {
-    const inner = destination.slice(1, -1)
-    return `<${localizeInternalHref(inner)}>`
-  }
-  return localizeInternalHref(destination)
+function rewriteInternalHref(value, targetLocale) {
+  if (targetLocale === null || targetLocale === false) return value
+  if (targetLocale === 'canonical') return canonicalInternalHref(value)
+  return localizeInternalHref(value, targetLocale)
 }
 
-function localizeLinkTail(tail) {
+function localizeDestination(destination, targetLocale) {
+  if (destination.startsWith('<') && destination.endsWith('>')) {
+    const inner = destination.slice(1, -1)
+    return `<${rewriteInternalHref(inner, targetLocale)}>`
+  }
+  return rewriteInternalHref(destination, targetLocale)
+}
+
+function localizeLinkTail(tail, targetLocale) {
   if (!tail.startsWith('(') || !tail.endsWith(')')) return tail
   const inner = tail.slice(1, -1)
   const leading = inner.match(/^\s*/)?.[0] ?? ''
   const afterLeading = inner.slice(leading.length)
   const match = afterLeading.match(/^(<[^>\r\n]*>|[^\s)]+)([\s\S]*)$/)
   if (!match) return tail
-  return `(${leading}${localizeDestination(match[1])}${match[2]})`
+  return `(${leading}${localizeDestination(match[1], targetLocale)}${match[2]})`
 }
 
-function localizeHtmlTag(tag) {
+function localizeHtmlTag(tag, targetLocale) {
   return tag.replace(
     /(\b(?:href|src)\s*=\s*)(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi,
     (match, prefix, doubleQuoted, singleQuoted, bare) => {
       if (typeof doubleQuoted === 'string') {
-        return `${prefix}"${localizeInternalHref(doubleQuoted)}"`
+        return `${prefix}"${rewriteInternalHref(doubleQuoted, targetLocale)}"`
       }
       if (typeof singleQuoted === 'string') {
-        return `${prefix}'${localizeInternalHref(singleQuoted)}'`
+        return `${prefix}'${rewriteInternalHref(singleQuoted, targetLocale)}'`
       }
       if (typeof bare === 'string') {
-        return `${prefix}${localizeInternalHref(bare)}`
+        return `${prefix}${rewriteInternalHref(bare, targetLocale)}`
       }
       return match
     }
@@ -89,10 +99,11 @@ function htmlTagEndAt(text, start) {
   return -1
 }
 
-function localizeReferenceDefinition(line) {
+function localizeReferenceDefinition(line, targetLocale) {
   return line.replace(
     /^(\s*\[[^\]]+\]:[ \t]*)(<[^>\r\n]*>|[^\s]+)([\s\S]*)$/,
-    (match, prefix, destination, suffix) => `${prefix}${localizeDestination(destination)}${suffix}`
+    (match, prefix, destination, suffix) =>
+      `${prefix}${localizeDestination(destination, targetLocale)}${suffix}`
   )
 }
 
@@ -106,12 +117,14 @@ function tokenPrefixFor(text) {
 
 // Masks syntax that must survive translation byte-for-byte: fenced code,
 // inline code, math, link/image destinations, reference definitions, raw HTML
-// tags, and autolinks. Labels and prose stay translatable. Internal /zh-cn/
-// targets are localized before they are stored, so restoring the placeholders
-// produces English navigation targets without ever parsing model output as
-// Markdown.
+// tags, and autolinks. Labels and prose stay translatable. Internal locale
+// targets are rewritten before they are stored, so restoring the placeholders
+// produces navigation targets for the requested locale without ever parsing
+// model output as Markdown. Pass targetLocale: null to preserve destinations,
+// or 'canonical' to strip locale prefixes for comparison.
 export function maskMarkdown(body, options = {}) {
   if (typeof body !== 'string') throw new TypeError('Markdown body must be a string')
+  const targetLocale = options.targetLocale === undefined ? englishDirName : options.targetLocale
   const prefix = options.tokenPrefix ?? tokenPrefixFor(body)
   const tokens = []
   const chunks = []
@@ -134,7 +147,7 @@ export function maskMarkdown(body, options = {}) {
 
       const reference = line.match(/^ {0,3}\[[^\]\r\n]+\]:[ \t]*[^\r\n]*(?:\r?\n|$)/)
       if (reference) {
-        const value = localizeReferenceDefinition(line)
+        const value = localizeReferenceDefinition(line, targetLocale)
         addToken(value, 'reference-definition')
         position += line.length
         last = position
@@ -255,7 +268,7 @@ export function maskMarkdown(body, options = {}) {
 
     const htmlEnd = htmlTagEndAt(body, position)
     if (htmlEnd !== -1) {
-      addToken(localizeHtmlTag(body.slice(position, htmlEnd)), 'html')
+      addToken(localizeHtmlTag(body.slice(position, htmlEnd), targetLocale), 'html')
       position = htmlEnd
       last = position
       continue
@@ -275,21 +288,34 @@ export function maskMarkdown(body, options = {}) {
           if (tailEnd !== -1) {
             const label = body.slice(labelStart, labelEnd)
             if (/[`$<]/.test(label)) {
-              addToken(body.slice(position, tailEnd + 1), 'link-whole')
+              addToken(
+                `${body.slice(position, labelEnd + 1)}` +
+                localizeLinkTail(body.slice(afterLabel, tailEnd + 1), targetLocale),
+                'link-whole'
+              )
               position = tailEnd + 1
               last = position
               continue
             }
+            // The closing label bracket is appended separately. If it were
+            // included in the recursively masked label, the bare-URL matcher
+            // could swallow it and restoreMaskedMarkdown would see a link
+            // target no longer preceded by "]".
             const labelMasked = options.protectBareUrls
-              ? maskMarkdown(body.slice(position, labelEnd + 1), {
+              ? maskMarkdown(body.slice(position, labelEnd), {
                   protectBareUrls: true,
-                  protectPipes: true
+                  protectPipes: true,
+                  targetLocale
                 })
-              : { text: body.slice(position, labelEnd + 1), tokens: [] }
-            chunks.push(body.slice(last, position), labelMasked.text)
+              : { text: body.slice(position, labelEnd), tokens: [] }
+            chunks.push(body.slice(last, position), labelMasked.text, ']')
             tokens.push(...labelMasked.tokens)
             const token = `@@${prefix}_${tokens.length + 1}@@`
-            tokens.push({ token, value: localizeLinkTail(body.slice(afterLabel, tailEnd + 1)), kind: 'link' })
+            tokens.push({
+              token,
+              value: localizeLinkTail(body.slice(afterLabel, tailEnd + 1), targetLocale),
+              kind: 'link'
+            })
             chunks.push(token)
             position = tailEnd + 1
             last = position
@@ -306,12 +332,13 @@ export function maskMarkdown(body, options = {}) {
               continue
             }
             const labelMasked = options.protectBareUrls
-              ? maskMarkdown(body.slice(position, labelEnd + 1), {
+              ? maskMarkdown(body.slice(position, labelEnd), {
                   protectBareUrls: true,
-                  protectPipes: true
+                  protectPipes: true,
+                  targetLocale
                 })
-              : { text: body.slice(position, labelEnd + 1), tokens: [] }
-            chunks.push(body.slice(last, position), labelMasked.text)
+              : { text: body.slice(position, labelEnd), tokens: [] }
+            chunks.push(body.slice(last, position), labelMasked.text, ']')
             tokens.push(...labelMasked.tokens)
             const token = `@@${prefix}_${tokens.length + 1}@@`
             tokens.push({

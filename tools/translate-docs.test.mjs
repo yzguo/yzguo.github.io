@@ -4,7 +4,14 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import { getMarkdownParser } from './check-bilingual.mjs'
-import { collectTranslationSources, main, translateSource, writeTranslationsAtomically } from './translate-docs.mjs'
+import { findSimplifiedText } from './traditional-chinese.mjs'
+import {
+  collectTranslationSources,
+  main,
+  translateSource,
+  translateTraditionalSource,
+  writeTranslationsAtomically
+} from './translate-docs.mjs'
 
 const dictionary = new Map([
   ['标题', 'Title'],
@@ -33,7 +40,7 @@ function fakeModel(options = {}) {
   const prompts = []
   async function requestModel({ system, prompt }) {
     prompts.push({ system, prompt })
-    if (prompt.includes('strict bilingual content reviewer')) {
+    if (prompt.includes('You are a strict trilingual documentation reviewer')) {
       if (options.semanticError) throw new Error(options.semanticError)
       return JSON.stringify(options.verdict ?? { equivalent: true, issues: [] })
     }
@@ -87,17 +94,6 @@ function fakeModel(options = {}) {
       if (options.batchRawResponse) return options.batchRawResponse(translated)
       return JSON.stringify(translated)
     }
-    if (prompt.includes('Translate the Chinese Markdown body')) {
-      if (options.bodyError) throw new Error(options.bodyError)
-      const match = prompt.match(/<<<CHINESE MARKDOWN BODY [^>]+>>>\n([\s\S]*?)\n<<<END/)
-      if (!match) throw new Error('missing body')
-      let body = match[1]
-      if (options.bodyResponse) return options.bodyResponse(body)
-      for (const [chinese, english] of dictionary) {
-        body = body.replaceAll(chinese, english)
-      }
-      return body
-    }
     throw new Error(`unexpected prompt: ${prompt.slice(0, 80)}`)
   }
   return { requestModel, prompts }
@@ -127,7 +123,7 @@ test('translation sources cover docs, README, and root Chinese documents only', 
   const rootDir = await makeProject(t, {
     'docs/zh-cn/index.md': '# 标题\n\n欢迎。\n',
     'docs/zh-cn/Notes/demo.md': '# 笔记\n\n正文。\n',
-    'docs/index.md': '# Existing English\n',
+    'docs/en/index.md': '# Existing English\n',
     'English.md': '# English page\n\n提到了中文专名。\n',
     '网站问题排查与优化方案.md': '# 根文档\n'
   })
@@ -135,12 +131,18 @@ test('translation sources cover docs, README, and root Chinese documents only', 
   const collection = await collectTranslationSources(rootDir)
   assert.deepEqual(collection.errors, [])
   assert.deepEqual(
-    collection.sources.map((source) => [source.sourcePath, source.targetPath]),
+    collection.sources.map((source) => [
+      source.sourcePath,
+      source.targets.map((target) => target.targetPath)
+    ]),
     [
-      ['README.zh-CN.md', 'README.md'],
-      ['docs/zh-cn/Notes/demo.md', 'docs/Notes/demo.md'],
-      ['docs/zh-cn/index.md', 'docs/index.md'],
-      ['网站问题排查与优化方案.md', '网站问题排查与优化方案.en.md']
+      ['README.zh-CN.md', ['README.md', 'README.zh-TW.md']],
+      ['docs/zh-cn/Notes/demo.md', ['docs/en/Notes/demo.md', 'docs/zh-tw/Notes/demo.md']],
+      ['docs/zh-cn/index.md', ['docs/en/index.md', 'docs/zh-tw/index.md']],
+      [
+        '网站问题排查与优化方案.md',
+        ['网站问题排查与优化方案.en.md', '网站问题排查与优化方案.zh-TW.md']
+      ]
     ]
   )
 })
@@ -159,7 +161,9 @@ test('generated English preserves code, math, links, and never includes private 
       '',
       '![图片](/zh-cn/images/pic.png)',
       '',
-      '\\[\nE=mc^2\n\\]',
+      '\\[',
+      'E=mc^2',
+      '\\]',
       '',
       '```python',
       '# 代码注释',
@@ -185,7 +189,7 @@ test('generated English preserves code, math, links, and never includes private 
   const md = await parserFor(rootDir)
   const english = await translateSource({
     sourcePath: 'docs/zh-cn/index.md',
-    targetPath: 'docs/index.md',
+    targetPath: 'docs/en/index.md',
     sourceText: await readFile(path.join(rootDir, 'docs/zh-cn/index.md'), 'utf8'),
     requestModel,
     md
@@ -200,8 +204,8 @@ test('generated English preserves code, math, links, and never includes private 
     english,
     /```mermaid\nflowchart TD\n    A\[Small angle\] --> B\[Equation of motion\]\n    B --> C\[Period T\]\n```/
   )
-  assert.match(english, /\[Notes\]\(\/Notes\/\)/)
-  assert.match(english, /link: \/Notes\//)
+  assert.match(english, /\[Notes\]\(\/en\/Notes\/\)/)
+  assert.match(english, /link: \/en\/Notes\//)
   assert.doesNotMatch(english, /私密注记|这段内容|private:start/)
   assert.doesNotMatch(prompts.map((entry) => entry.prompt).join('\n'), /私密注记|这段内容|private:start/)
 })
@@ -231,7 +235,7 @@ test('translation prompts never receive protected code, formulas, or URLs', asyn
     '',
     `<a href="https://${sentinel}.example/html">中文</a>`,
     '',
-    `<a href=/relative/path?token=${sentinel}>中文链接</a>`,
+    `<a href=/zh-cn/relative/path?token=${sentinel}>中文链接</a>`,
     '',
     '长段落 ' + 'a'.repeat(900) + ` \`多行代码 ${sentinel}`,
     `结束\` ${'b'.repeat(900)}。`,
@@ -252,7 +256,7 @@ test('translation prompts never receive protected code, formulas, or URLs', asyn
   const md = await parserFor(rootDir)
   const english = await translateSource({
     sourcePath: 'docs/zh-cn/index.md',
-    targetPath: 'docs/index.md',
+    targetPath: 'docs/en/index.md',
     sourceText: source,
     requestModel,
     md
@@ -265,7 +269,7 @@ test('translation prompts never receive protected code, formulas, or URLs', asyn
   assert.match(english, new RegExp(`\\(https://${sentinel}\\.example/target\\)`))
   assert.match(english, new RegExp(`https://${sentinel}\\.example/path_\\(part\\)/suffix\\?token=${sentinel}`))
   assert.match(english, new RegExp(`href="https://${sentinel}\\.example/html"`))
-  assert.match(english, new RegExp(`href=/relative/path\\?token=${sentinel}`))
+  assert.match(english, new RegExp(`href=/en/relative/path\\?token=${sentinel}`))
   assert.ok(english.includes(`\`多行代码 ${sentinel}\n结束\``))
   assert.ok(
     !prompts.map((entry) => entry.prompt).join('\n').includes(sentinel),
@@ -302,7 +306,7 @@ test('adjacent inline code and bold endings get readable English spacing', async
   const md = await parserFor(rootDir)
   const english = await translateSource({
     sourcePath: 'docs/zh-cn/index.md',
-    targetPath: 'docs/index.md',
+    targetPath: 'docs/en/index.md',
     sourceText: source,
     requestModel,
     md
@@ -327,14 +331,12 @@ test('table cell inline code uses the enclosing row source range', async (t) => 
     '| 链接 | `代码` |',
     ''
   ].join('\n')
-  const rootDir = await makeProject(t, {
-    'docs/zh-cn/index.md': source
-  })
+  const rootDir = await makeProject(t, { 'docs/zh-cn/index.md': source })
   const { requestModel, prompts } = fakeModel()
   const md = await parserFor(rootDir)
   const english = await translateSource({
     sourcePath: 'docs/zh-cn/index.md',
-    targetPath: 'docs/index.md',
+    targetPath: 'docs/en/index.md',
     sourceText: source,
     requestModel,
     md
@@ -358,9 +360,7 @@ test('English prose spaces links and converts leftover Chinese punctuation', asy
     '`代码。`',
     ''
   ].join('\n')
-  const rootDir = await makeProject(t, {
-    'docs/zh-cn/index.md': source
-  })
+  const rootDir = await makeProject(t, { 'docs/zh-cn/index.md': source })
   const replacements = new Map([
     ['标题', 'Title'],
     ['请参阅', 'Please refer to'],
@@ -376,7 +376,7 @@ test('English prose spaces links and converts leftover Chinese punctuation', asy
   const md = await parserFor(rootDir)
   const english = await translateSource({
     sourcePath: 'docs/zh-cn/index.md',
-    targetPath: 'docs/index.md',
+    targetPath: 'docs/en/index.md',
     sourceText: source,
     requestModel,
     md
@@ -384,12 +384,12 @@ test('English prose spaces links and converts leftover Chinese punctuation', asy
 
   assert.match(
     english,
-    /Please refer to \[About\]\(\/About\/\) page, and check `count`\./
+    /Please refer to \[About\]\(\/en\/About\/\) page, and check `count`\./
   )
   assert.match(english, /\|\s*Name\s*\|\s*Formula\s*\|/)
   assert.match(english, /\|\s*Value\s*\|\s*\$x\$\.\s*\|/)
   assert.match(english, /`代码。`/)
-  assert.ok(english.includes('(/About/)'))
+  assert.ok(english.includes('(/en/About/)'))
   assert.doesNotMatch(english.replace(/`[^`\n]*`/g, ''), /[。，；：？！]/)
 })
 
@@ -414,9 +414,7 @@ test('long tables, links, and inline code are translated in bounded segments', a
     '结尾段落。',
     ''
   ].join('\n')
-  const rootDir = await makeProject(t, {
-    'docs/zh-cn/index.md': source
-  })
+  const rootDir = await makeProject(t, { 'docs/zh-cn/index.md': source })
 
   const { requestModel, prompts } = fakeModel({
     bodyResponse: (body) => {
@@ -429,7 +427,7 @@ test('long tables, links, and inline code are translated in bounded segments', a
   const md = await parserFor(rootDir)
   const english = await translateSource({
     sourcePath: 'docs/zh-cn/index.md',
-    targetPath: 'docs/index.md',
+    targetPath: 'docs/en/index.md',
     sourceText: source,
     requestModel,
     md
@@ -441,7 +439,7 @@ test('long tables, links, and inline code are translated in bounded segments', a
   for (const entry of batchPrompts) {
     assert.doesNotMatch(entry.prompt, /@@[A-Za-z0-9_]+@@/)
     assert.doesNotMatch(entry.prompt, /\(\/zh-cn\/A\//)
-    assert.doesNotMatch(entry.prompt, /\(\/A\//)
+    assert.doesNotMatch(entry.prompt, /\(\/en\/A\//)
     const match = entry.prompt.match(/<<<TEXT FRAGMENTS [^>]+>>>\n([\s\S]*?)\n<<<END/)
     const segments = JSON.parse(match[1])
     assert.ok(segments.length <= 8)
@@ -456,7 +454,7 @@ test('long tables, links, and inline code are translated in bounded segments', a
     assert.ok(characters <= 12000)
   }
   assert.match(english, /# Title/)
-  assert.match(english, /\[Link17\]\(\/A\/17\)/)
+  assert.match(english, /\[Link17\]\(\/en\/A\/17\)/)
   assert.match(english, /`代码17`/)
   assert.match(english, /Chinese notes\. 17/)
   assert.match(english, /```python\n# 中文代码\nprint\(1\)\n```/)
@@ -472,7 +470,7 @@ test('malformed batch responses fail closed without writing', async (t) => {
     batchRawResponse: (items) => JSON.stringify(items.slice(1))
   })
   const errors = []
-  const code = await main(['--write'], {
+  const code = await main(['--write', '--lang', 'en'], {
     rootDir,
     requestModel,
     log: () => {},
@@ -481,7 +479,8 @@ test('malformed batch responses fail closed without writing', async (t) => {
 
   assert.equal(code, 1)
   assert.match(errors.join('\n'), /片段翻译数量|片段 ID|片段翻译结果/)
-  await assert.rejects(readFile(path.join(rootDir, 'docs/index.md'), 'utf8'), { code: 'ENOENT' })
+  await assert.rejects(readFile(path.join(rootDir, 'docs/en/index.md'), 'utf8'), { code: 'ENOENT' })
+  await assert.rejects(readFile(path.join(rootDir, 'docs/zh-tw/index.md'), 'utf8'), { code: 'ENOENT' })
   assert.equal(
     await readFile(path.join(rootDir, 'README.md'), 'utf8'),
     '# Manual English\n\nDo not overwrite.\n'
@@ -490,9 +489,7 @@ test('malformed batch responses fail closed without writing', async (t) => {
 
 test('a model that changes table structure fails before writing', async (t) => {
   const source = '| 标题 |\n| --- |\n| 欢迎 |\n'
-  const rootDir = await makeProject(t, {
-    'docs/zh-cn/index.md': source
-  })
+  const rootDir = await makeProject(t, { 'docs/zh-cn/index.md': source })
   const { requestModel } = fakeModel({
     bodyResponse: (body) => body === '标题' ? 'Title | extra' : body
   })
@@ -500,7 +497,7 @@ test('a model that changes table structure fails before writing', async (t) => {
   await assert.rejects(
     translateSource({
       sourcePath: 'docs/zh-cn/index.md',
-      targetPath: 'docs/index.md',
+      targetPath: 'docs/en/index.md',
       sourceText: source,
       requestModel,
       md
@@ -520,7 +517,7 @@ test('missing fragment responses and semantic mismatches fail without writing', 
   await assert.rejects(
     translateSource({
       sourcePath: 'docs/zh-cn/index.md',
-      targetPath: 'docs/index.md',
+      targetPath: 'docs/en/index.md',
       sourceText: '# 标题\n\n文字 `代码` 结束。\n',
       requestModel: missing.requestModel,
       md
@@ -534,7 +531,7 @@ test('missing fragment responses and semantic mismatches fail without writing', 
   await assert.rejects(
     translateSource({
       sourcePath: 'docs/zh-cn/index.md',
-      targetPath: 'docs/index.md',
+      targetPath: 'docs/en/index.md',
       sourceText: '# 标题\n\n欢迎。\n',
       requestModel: semantic.requestModel,
       md
@@ -543,7 +540,57 @@ test('missing fragment responses and semantic mismatches fail without writing', 
   )
 })
 
-test('main is a safe plan by default and writes only missing English files', async (t) => {
+test('Traditional translation is real conversion and preserves protected content', async (t) => {
+  const source = [
+    '---',
+    'title: 标题',
+    'link: /zh-cn/Notes/',
+    '---',
+    '',
+    '# 标题',
+    '',
+    '这里介绍软件与网络。<!-- 私密注记 -->',
+    '',
+    '![图片](/zh-cn/images/pic.png)',
+    '',
+    '公式 $E=mc^2$。',
+    '',
+    '```python',
+    '# 代码注释保持不变',
+    'print("简体")',
+    '```',
+    '',
+    '```mermaid',
+    'flowchart TD',
+    '    A[小角度] --> B[运动方程]',
+    '```',
+    '',
+    '[笔记](/zh-cn/Notes/)',
+    ''
+  ].join('\n')
+  const rootDir = await makeProject(t, { 'docs/zh-cn/index.md': source })
+  const md = await parserFor(rootDir)
+  const traditional = await translateTraditionalSource({
+    sourcePath: 'docs/zh-cn/index.md',
+    targetPath: 'docs/zh-tw/index.md',
+    sourceText: source,
+    md
+  })
+
+  assert.notEqual(traditional, source)
+  assert.match(traditional, /title: 標題/)
+  assert.match(traditional, /link: \/zh-tw\/Notes\//)
+  assert.match(traditional, /# 標題/)
+  assert.match(traditional, /這裡介紹軟體與網路。/)
+  assert.ok(traditional.includes('![圖片](/images/pic.png)'))
+  assert.ok(traditional.includes('$E=mc^2$'))
+  assert.ok(traditional.includes('```python\n# 代码注释保持不变\nprint("简体")\n```'))
+  assert.ok(traditional.includes('A[小角度] --> B[運動方程]'))
+  assert.ok(traditional.includes('[筆記](/zh-tw/Notes/)'))
+  assert.doesNotMatch(traditional, /私密注记/)
+})
+
+test('main is a safe plan by default and writes missing English and Traditional targets', async (t) => {
   const rootDir = await makeProject(t, {
     'docs/zh-cn/index.md': '---\ntitle: 标题\nlink: /zh-cn/Notes/\n---\n\n# 标题\n\n欢迎。\n',
     'docs/zh-cn/Notes/demo.md': '# 笔记\n\n正文。\n',
@@ -567,14 +614,30 @@ test('main is a safe plan by default and writes only missing English files', asy
   assert.equal(await main(['--write'], options), 0)
   assert.deepEqual(errors, [])
   assert.equal(await readFile(path.join(rootDir, 'README.md'), 'utf8'), '# Manual English\n\nDo not overwrite.\n')
-  const docsIndex = await readFile(path.join(rootDir, 'docs/index.md'), 'utf8')
+  const docsIndex = await readFile(path.join(rootDir, 'docs/en/index.md'), 'utf8')
   assert.match(docsIndex, /# Title/)
-  assert.match(docsIndex, /link: \/Notes\//)
-  assert.match(await readFile(path.join(rootDir, 'docs/Notes/demo.md'), 'utf8'), /# Notes/)
+  assert.match(docsIndex, /link: \/en\/Notes\//)
+  const docsTraditional = await readFile(path.join(rootDir, 'docs/zh-tw/index.md'), 'utf8')
+  assert.match(docsTraditional, /# 標題/)
+  assert.match(docsTraditional, /link: \/zh-tw\/Notes\//)
+  assert.notEqual(docsTraditional, await readFile(path.join(rootDir, 'docs/zh-cn/index.md'), 'utf8'))
+  assert.match(await readFile(path.join(rootDir, 'docs/en/Notes/demo.md'), 'utf8'), /# Notes/)
+  assert.match(await readFile(path.join(rootDir, 'docs/zh-tw/Notes/demo.md'), 'utf8'), /# 筆記/)
   assert.match(await readFile(path.join(rootDir, '网站问题排查与优化方案.en.md'), 'utf8'), /# Root document\./)
+  const rootTraditional = await readFile(
+    path.join(rootDir, '网站问题排查与优化方案.zh-TW.md'),
+    'utf8'
+  )
+  assert.match(rootTraditional, /^# 根/m)
+  assert.equal(findSimplifiedText(rootTraditional), null)
+  assert.notEqual(
+    rootTraditional,
+    await readFile(path.join(rootDir, '网站问题排查与优化方案.md'), 'utf8')
+  )
+  assert.match(await readFile(path.join(rootDir, 'README.zh-TW.md'), 'utf8'), /# 中文說明/)
 })
 
-test('force is required to replace manual English and only works with write', async (t) => {
+test('force is required to replace manual targets and only works with write', async (t) => {
   const rootDir = await makeProject(t, {
     'docs/zh-cn/index.md': '# 标题\n\n欢迎。\n'
   })
@@ -596,6 +659,27 @@ test('force is required to replace manual English and only works with write', as
 
   assert.equal(await main(['--write', '--force'], options), 0)
   assert.match(await readFile(path.join(rootDir, 'README.md'), 'utf8'), /# 中文说明|# Chinese notes/)
+  assert.match(await readFile(path.join(rootDir, 'README.zh-TW.md'), 'utf8'), /# 中文說明/)
+})
+
+test('--lang limits generation and Traditional conversion needs no model', async (t) => {
+  const rootDir = await makeProject(t, {
+    'docs/zh-cn/index.md': '# 标题\n\n欢迎。\n'
+  })
+  const { requestModel, prompts } = fakeModel()
+  const errors = []
+  const code = await main(['--write', '--lang', 'zh-tw', '--only', 'docs/zh-cn/index.md'], {
+    rootDir,
+    requestModel,
+    log: () => {},
+    errorLog: (line) => errors.push(line)
+  })
+
+  assert.equal(code, 0)
+  assert.deepEqual(errors, [])
+  assert.equal(prompts.length, 0, 'Traditional conversion must not call the model')
+  await assert.rejects(readFile(path.join(rootDir, 'docs/en/index.md'), 'utf8'), { code: 'ENOENT' })
+  assert.match(await readFile(path.join(rootDir, 'docs/zh-tw/index.md'), 'utf8'), /# 標題/)
 })
 
 test('a failure in any file prevents every generated write', async (t) => {
@@ -621,8 +705,10 @@ test('a failure in any file prevents every generated write', async (t) => {
   assert.ok(prompts.length >= 1)
   assert.match(errors.join('\n'), /simulated model failure/)
   assert.match(errors.join('\n'), /未写入任何文件/)
-  await assert.rejects(readFile(path.join(rootDir, 'docs/a.md'), 'utf8'), { code: 'ENOENT' })
-  await assert.rejects(readFile(path.join(rootDir, 'docs/b.md'), 'utf8'), { code: 'ENOENT' })
+  await assert.rejects(readFile(path.join(rootDir, 'docs/en/a.md'), 'utf8'), { code: 'ENOENT' })
+  await assert.rejects(readFile(path.join(rootDir, 'docs/en/b.md'), 'utf8'), { code: 'ENOENT' })
+  await assert.rejects(readFile(path.join(rootDir, 'docs/zh-tw/a.md'), 'utf8'), { code: 'ENOENT' })
+  await assert.rejects(readFile(path.join(rootDir, 'docs/zh-tw/b.md'), 'utf8'), { code: 'ENOENT' })
 })
 
 test('the CLI can target an isolated root and a single pair for real-model E2E', async (t) => {
@@ -642,12 +728,14 @@ test('the CLI can target an isolated root and a single pair for real-model E2E',
   )
   assert.equal(code, 0)
   assert.deepEqual(errors, [])
-  assert.match(await readFile(path.join(rootDir, 'docs/index.md'), 'utf8'), /# Title/)
-  await assert.rejects(readFile(path.join(rootDir, 'docs/other.md'), 'utf8'), { code: 'ENOENT' })
+  assert.match(await readFile(path.join(rootDir, 'docs/en/index.md'), 'utf8'), /# Title/)
+  assert.match(await readFile(path.join(rootDir, 'docs/zh-tw/index.md'), 'utf8'), /# 標題/)
+  await assert.rejects(readFile(path.join(rootDir, 'docs/en/other.md'), 'utf8'), { code: 'ENOENT' })
+  await assert.rejects(readFile(path.join(rootDir, 'docs/zh-tw/other.md'), 'utf8'), { code: 'ENOENT' })
   assert.equal(prompts.length > 0, true)
 })
 
-test('semantic failure leaves an existing manual English file untouched', async (t) => {
+test('semantic failure leaves existing manual targets untouched', async (t) => {
   const rootDir = await makeProject(t, {
     'docs/zh-cn/index.md': '# 标题\n\n欢迎。\n'
   })
@@ -664,16 +752,18 @@ test('semantic failure leaves an existing manual English file untouched', async 
   assert.equal(code, 1)
   assert.match(errors.join('\n'), /语义校验失败/)
   assert.equal(await readFile(path.join(rootDir, 'README.md'), 'utf8'), '# Manual English\n\nDo not overwrite.\n')
+  await assert.rejects(readFile(path.join(rootDir, 'docs/en/index.md'), 'utf8'), { code: 'ENOENT' })
+  await assert.rejects(readFile(path.join(rootDir, 'docs/zh-tw/index.md'), 'utf8'), { code: 'ENOENT' })
 })
 
 test('atomic writes roll back an earlier commit when a later rename fails', async (t) => {
   const rootDir = await makeProject(t, {
-    'docs/one.md': 'old one\n',
-    'docs/two.md': 'old two\n'
+    'docs/en/one.md': 'old one\n',
+    'docs/zh-tw/two.md': 'old two\n'
   })
   const files = {
-    one: path.join(rootDir, 'docs/one.md'),
-    two: path.join(rootDir, 'docs/two.md')
+    one: path.join(rootDir, 'docs/en/one.md'),
+    two: path.join(rootDir, 'docs/zh-tw/two.md')
   }
   let renameCount = 0
   const fs = {
@@ -690,25 +780,28 @@ test('atomic writes roll back an earlier commit when a later rename fails', asyn
       rootDir,
       fs,
       writes: [
-        { targetPath: 'docs/one.md', targetFsPath: files.one, content: 'new one\n', original: { exists: true, content: 'old one\n', mode: 0o644 } },
-        { targetPath: 'docs/two.md', targetFsPath: files.two, content: 'new two\n', original: { exists: true, content: 'old two\n', mode: 0o644 } }
+        { targetPath: 'docs/en/one.md', targetFsPath: files.one, content: 'new one\n', original: { exists: true, content: 'old one\n', mode: 0o644 } },
+        { targetPath: 'docs/zh-tw/two.md', targetFsPath: files.two, content: 'new two\n', original: { exists: true, content: 'old two\n', mode: 0o644 } }
       ]
     }),
     /已回滚/
   )
   assert.equal(await readFile(files.one, 'utf8'), 'old one\n')
   assert.equal(await readFile(files.two, 'utf8'), 'old two\n')
-  const leftovers = (await readdir(path.join(rootDir, 'docs'))).filter((name) => name.startsWith('.omp-translate-'))
+  const leftovers = [
+    ...(await readdir(path.join(rootDir, 'docs/en'))),
+    ...(await readdir(path.join(rootDir, 'docs/zh-tw')))
+  ].filter((name) => name.startsWith('.omp-translate-'))
   assert.deepEqual(leftovers, [])
 })
 
 test('concurrent manual edits abort the batch instead of overwriting them', async (t) => {
   const rootDir = await makeProject(t, {
-    'docs/one.md': 'old one\n'
+    'docs/zh-tw/one.md': 'old one\n'
   })
-  const target = path.join(rootDir, 'docs/one.md')
+  const target = path.join(rootDir, 'docs/zh-tw/one.md')
   const write = {
-    targetPath: 'docs/one.md',
+    targetPath: 'docs/zh-tw/one.md',
     targetFsPath: target,
     content: 'generated\n',
     original: { exists: true, content: 'old one\n', mode: 0o644 }
@@ -723,11 +816,11 @@ test('concurrent manual edits abort the batch instead of overwriting them', asyn
 
 test('rollback never overwrites a concurrent edit', async (t) => {
   const rootDir = await makeProject(t, {
-    'docs/one.md': 'old one\n',
-    'docs/two.md': 'old two\n'
+    'docs/en/one.md': 'old one\n',
+    'docs/zh-tw/two.md': 'old two\n'
   })
-  const one = path.join(rootDir, 'docs/one.md')
-  const two = path.join(rootDir, 'docs/two.md')
+  const one = path.join(rootDir, 'docs/en/one.md')
+  const two = path.join(rootDir, 'docs/zh-tw/two.md')
   let renames = 0
   const fs = {
     rename: async (from, to) => {
@@ -745,8 +838,8 @@ test('rollback never overwrites a concurrent edit', async (t) => {
       rootDir,
       fs,
       writes: [
-        { targetPath: 'docs/one.md', targetFsPath: one, content: 'new one\n', original: { exists: true, content: 'old one\n', mode: 0o644 } },
-        { targetPath: 'docs/two.md', targetFsPath: two, content: 'new two\n', original: { exists: true, content: 'old two\n', mode: 0o644 } }
+        { targetPath: 'docs/en/one.md', targetFsPath: one, content: 'new one\n', original: { exists: true, content: 'old one\n', mode: 0o644 } },
+        { targetPath: 'docs/zh-tw/two.md', targetFsPath: two, content: 'new two\n', original: { exists: true, content: 'old two\n', mode: 0o644 } }
       ]
     }),
     /回滚未完全成功|并发修改|拒绝回滚/
@@ -757,7 +850,7 @@ test('rollback never overwrites a concurrent edit', async (t) => {
 
 test('new targets are created exclusively, never replacing a racing file', async (t) => {
   const rootDir = await makeProject(t, {})
-  const target = path.join(rootDir, 'docs/new.md')
+  const target = path.join(rootDir, 'docs/zh-tw/new.md')
   await mkdir(path.dirname(target), { recursive: true })
   const fs = {
     link: async (from, to) => {
@@ -773,7 +866,7 @@ test('new targets are created exclusively, never replacing a racing file', async
       rootDir,
       fs,
       writes: [{
-        targetPath: 'docs/new.md',
+        targetPath: 'docs/zh-tw/new.md',
         targetFsPath: target,
         content: 'generated\n',
         original: { exists: false, content: null, mode: 0o666 }

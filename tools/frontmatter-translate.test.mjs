@@ -56,8 +56,8 @@ test('frontmatter translation changes values but not keys, links, or structure',
   assert.match(translated, /tagline: 'Ramblings, meow\.'/)
   assert.match(translated, /src: \/images\/pic\.png/)
   assert.match(translated, /alt: Yanzhen Guo's profile photo/)
-  assert.match(translated, /link: \/Notes\//)
-  assert.match(translated, /link: \/About\//)
+  assert.match(translated, /link: \/en\/Notes\//)
+  assert.match(translated, /link: \/en\/About\//)
   assert.match(translated, /- title: About/)
   assert.doesNotMatch(translated, /郭彦禛|关于|了解我/)
 })
@@ -76,7 +76,7 @@ test('frontmatter without Chinese text does not call the model but localizes lin
   }
   const translated = await translateFrontmatter(source, { requestModel, sourcePath: 'x' })
   assert.match(translated, /text: English already/)
-  assert.match(translated, /link: \/Notes\//)
+  assert.match(translated, /link: \/en\/Notes\//)
 })
 
 test('unsupported YAML constructs with Chinese fail instead of corrupting the file', async () => {

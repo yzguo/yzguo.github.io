@@ -1,5 +1,5 @@
 import { createMarkdownRenderer } from 'vitepress'
-import { localizeInternalHref } from './document-mapping.mjs'
+import { canonicalInternalHref } from './document-mapping.mjs'
 
 // Deterministic post-model validation using the same VitePress Markdown parser
 // that renders the site. Code and math tokens are trusted original content;
@@ -87,7 +87,7 @@ function normalizeUrl(value) {
   let url = String(value ?? '').trim()
   if (url.startsWith('<') && url.endsWith('>')) url = url.slice(1, -1)
   url = decodeEntities(url).replace(/[\u0000-\u001f\u007f\s]+/g, '')
-  return localizeInternalHref(url)
+  return canonicalInternalHref(url)
 }
 
 function dangerousUrl(value) {

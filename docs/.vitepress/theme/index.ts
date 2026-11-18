@@ -8,6 +8,7 @@ import './fonts/twemoji.css'
 import './fonts/noto-sans-sc.css'
 import './style.css'
 import LocalMermaid from './LocalMermaid.vue'
+import BrowserLanguageRedirect from './BrowserLanguageRedirect.vue'
 
 declare const __AI_SEARCH_ENABLED__: boolean
 
@@ -33,5 +34,6 @@ export default {
     Layout,
     enhanceApp({ app }) {
         app.component('LocalMermaid', LocalMermaid)
+        app.component('BrowserLanguageRedirect', BrowserLanguageRedirect)
     }
 } satisfies Theme

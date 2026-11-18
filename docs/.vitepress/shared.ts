@@ -17,10 +17,33 @@ export const shared = defineConfig({
         search: {
             provider: 'local',
             options: {
-                // Local search UI strings are resolved by the active locale.
-                // The root (English) locale uses VitePress's built-in English
-                // defaults; only Simplified Chinese needs overrides.
+                // Local search resolves these strings by locale index. Keep the
+                // three blocks structurally identical so every locale exposes
+                // the same button and modal labels.
                 locales: {
+                    'en': {
+                        translations: {
+                            button: {
+                                buttonText: 'Search',
+                                buttonAriaLabel: 'Search'
+                            },
+                            modal: {
+                                displayDetails: 'Display detailed list',
+                                resetButtonTitle: 'Reset search',
+                                backButtonTitle: 'Close search',
+                                noResultsText: 'No results for',
+                                footer: {
+                                    selectText: 'to select',
+                                    selectKeyAriaLabel: 'enter',
+                                    navigateText: 'to navigate',
+                                    navigateUpKeyAriaLabel: 'up arrow',
+                                    navigateDownKeyAriaLabel: 'down arrow',
+                                    closeText: 'to close',
+                                    closeKeyAriaLabel: 'escape'
+                                }
+                            }
+                        }
+                    },
                     'zh-cn': {
                         translations: {
                             button: {
@@ -39,6 +62,29 @@ export const shared = defineConfig({
                                     navigateUpKeyAriaLabel: '上箭头',
                                     navigateDownKeyAriaLabel: '下箭头',
                                     closeText: '关闭',
+                                    closeKeyAriaLabel: 'Esc'
+                                }
+                            }
+                        }
+                    },
+                    'zh-tw': {
+                        translations: {
+                            button: {
+                                buttonText: '搜尋',
+                                buttonAriaLabel: '搜尋'
+                            },
+                            modal: {
+                                displayDetails: '顯示詳細清單',
+                                resetButtonTitle: '重設搜尋',
+                                backButtonTitle: '關閉搜尋',
+                                noResultsText: '沒有結果',
+                                footer: {
+                                    selectText: '選擇',
+                                    selectKeyAriaLabel: '輸入',
+                                    navigateText: '導覽',
+                                    navigateUpKeyAriaLabel: '上箭頭',
+                                    navigateDownKeyAriaLabel: '下箭頭',
+                                    closeText: '關閉',
                                     closeKeyAriaLabel: 'Esc'
                                 }
                             }
