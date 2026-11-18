@@ -9,8 +9,8 @@ hero:
     alt: 郭彦禛的头像
   actions:
     - theme: brand
-      text: 博客与笔记
-      link: /zh-cn/Blogs/
+      text: 笔记
+      link: /zh-cn/Notes/
     - theme: alt
       text: 关于
       link: /zh-cn/About/
@@ -26,9 +26,9 @@ features:
     details: 我参与或正在整理的项目。
     link: /zh-cn/Projects/
     linkText: 查看项目
-  - title: 博客与笔记
+  - title: 笔记
     details: 课程、学习与工作笔记。
-    link: /zh-cn/Blogs/
+    link: /zh-cn/Notes/
     linkText: 阅读笔记
 ---
 

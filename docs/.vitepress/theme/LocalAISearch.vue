@@ -19,15 +19,17 @@ type Outcome =
 
 declare const __AI_SEARCH_ENABLED__: boolean
 
+// index.ts imports this component only when the resolved dev-server switch is
+// true. The compile-time guard below is defense in depth if the component is
+// imported directly; the endpoint also refuses requests independently.
+const enabled = __AI_SEARCH_ENABLED__
+
 const AI_SEARCH_PATH = '/__ai-search'
+
 // The server/model timeout defaults to 300000ms. This finite 15-minute hard
 // stop only covers a hung dev server; a normal server timeout produces an
 // explicit error at 300 seconds. Keep AI_REQUEST_TIMEOUT_MS below this bound.
 const REQUEST_TIMEOUT_MS = 900_000
-
-// The switch is resolved once at build/dev-server time. Production builds
-// always compile it to false, so this component never mounts there.
-const enabled = __AI_SEARCH_ENABLED__
 
 const { lang } = useData()
 const route = useRoute()

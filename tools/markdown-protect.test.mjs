@@ -19,7 +19,7 @@ test('masking preserves syntax while leaving visible prose translatable', () => 
     '  A[中文] --> B[结束]',
     '```',
     '',
-    '链接 [博客](/zh-cn/Blogs/) 与 <a href="/zh-cn/About/">关于</a>。',
+    '链接 [博客](/zh-cn/Notes/) 与 <a href="/zh-cn/About/">关于</a>。',
     '',
     '[ref]: /zh-cn/Projects/ "项目"'
   ].join('\n')
@@ -43,7 +43,7 @@ test('masking preserves syntax while leaving visible prose translatable', () => 
   assert.match(restored, /`行内代码`/)
   assert.match(restored, /\$a\+b\$/)
   assert.match(restored, /!\[图片\]\(\/images\/pic\.png\)/)
-  assert.match(restored, /\[博客\]\(\/Blogs\/\)/)
+  assert.match(restored, /\[博客\]\(\/Notes\/\)/)
   assert.match(restored, /<a href="\/About\/">About<\/a>/)
   assert.match(restored, /```mermaid\nflowchart TD\n  A\[中文\] --> B\[结束\]\n```/)
   assert.match(restored, /\[ref\]: \/Projects\/ "项目"/)

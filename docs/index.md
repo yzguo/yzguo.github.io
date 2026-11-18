@@ -9,8 +9,8 @@ hero:
     alt: Yanzhen Guo's profile photo
   actions:
     - theme: brand
-      text: Blogs and notes
-      link: /Blogs/
+      text: Notes
+      link: /Notes/
     - theme: alt
       text: About
       link: /About/
@@ -26,9 +26,9 @@ features:
     details: Projects I have contributed to or am documenting.
     link: /Projects/
     linkText: View projects
-  - title: Blogs and notes
+  - title: Notes
     details: Course, learning, and work notes.
-    link: /Blogs/
+    link: /Notes/
     linkText: Read the notes
 ---
 

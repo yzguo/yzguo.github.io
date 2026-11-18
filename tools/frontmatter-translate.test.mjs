@@ -18,8 +18,8 @@ test('frontmatter translation changes values but not keys, links, or structure',
     '    alt: 郭彦禛的头像',
     '  actions:',
     '    - theme: brand',
-    '      text: 博客与笔记',
-    '      link: /zh-cn/Blogs/',
+    '      text: 笔记',
+    '      link: /zh-cn/Notes/',
     'features:',
     '  - title: 关于',
     '    details: 学习经历、兴趣与联系方式。',
@@ -36,7 +36,7 @@ test('frontmatter translation changes values but not keys, links, or structure',
       if (value === '个人网站') return 'Personal website'
       if (value === '碎碎念喵') return 'Ramblings, meow.'
       if (value === '郭彦禛的头像') return "Yanzhen Guo's profile photo"
-      if (value === '博客与笔记') return 'Blogs and notes'
+      if (value === '笔记') return 'Notes'
       if (value === '关于') return 'About'
       if (value === '学习经历、兴趣与联系方式。') return 'Education, interests, and contact details.'
       if (value === '了解我') return 'About me'
@@ -56,7 +56,7 @@ test('frontmatter translation changes values but not keys, links, or structure',
   assert.match(translated, /tagline: 'Ramblings, meow\.'/)
   assert.match(translated, /src: \/images\/pic\.png/)
   assert.match(translated, /alt: Yanzhen Guo's profile photo/)
-  assert.match(translated, /link: \/Blogs\//)
+  assert.match(translated, /link: \/Notes\//)
   assert.match(translated, /link: \/About\//)
   assert.match(translated, /- title: About/)
   assert.doesNotMatch(translated, /郭彦禛|关于|了解我/)
@@ -69,14 +69,14 @@ test('frontmatter without Chinese text does not call the model but localizes lin
     '    src: /images/pic.png',
     '  actions:',
     '    - text: English already',
-    '      link: /zh-cn/Blogs/'
+    '      link: /zh-cn/Notes/'
   ])
   const requestModel = async () => {
     throw new Error('model must not be called')
   }
   const translated = await translateFrontmatter(source, { requestModel, sourcePath: 'x' })
   assert.match(translated, /text: English already/)
-  assert.match(translated, /link: \/Blogs\//)
+  assert.match(translated, /link: \/Notes\//)
 })
 
 test('unsupported YAML constructs with Chinese fail instead of corrupting the file', async () => {

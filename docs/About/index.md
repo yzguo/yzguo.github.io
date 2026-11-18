@@ -13,7 +13,7 @@ I'm Yanzhen Guo, currently studying physics at the University of Science and Tec
 
 ## Interests
 
-My main interests are physics, computing, and engineering. Some of what I learn ends up in the blog.
+My main interests are physics, computing, and engineering. Some of what I learn ends up in the notes.
 
 ## Work and competitions
 

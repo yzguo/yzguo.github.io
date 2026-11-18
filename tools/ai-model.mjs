@@ -11,13 +11,13 @@ const here = path.dirname(fileURLToPath(import.meta.url))
 const repositoryRoot = path.resolve(here, '..')
 const repositoryDocsPath = path.join(repositoryRoot, 'docs')
 
-export const AI_MODEL_CONFIG_PATH = path.join(here, 'api-key.txt')
+export const AI_MODEL_CONFIG_PATH = path.join(here, 'model-config.yaml')
 export const DEFAULT_TIMEOUT_MS = 300_000
 export const DEFAULT_MAX_OUTPUT_TOKENS = 16_384
 
 const DOCS_CONFIG_ERROR = '模型配置文件不能位于站点的 docs 目录'
 const UNSAFE_REPOSITORY_CONFIG_ERROR =
-  '模型配置文件必须位于仓库外，或使用仓库内已忽略的 tools/api-key.txt、tools/api-key.*、tools/*.key、tools/*.pem、tools/*.secret.*、tools/*.private.*、tools/*.local.*、tools/.env*，或根目录 .env/.env.*（.env.example 除外）'
+  '模型配置文件必须位于仓库外，或使用仓库内已忽略的 tools/model-config.yaml、tools/model-config.yml、tools/model-config.json、tools/*.key、tools/*.pem、tools/*.secret.*、tools/*.private.*、tools/*.local.*、tools/.env*，或根目录 .env/.env.*（.env.example 除外）'
 
 const MAX_TIMEOUT_MS = 2_147_483_647
 const MAX_CONFIG_BYTES = 1024 * 1024
@@ -106,53 +106,41 @@ function normalizePathForComparison(value) {
   return process.platform === 'win32' ? absolute.toLowerCase() : absolute
 }
 
-function isPathInside(parent, child) {
+function relativePathWithin(parent, child) {
   const relative = path.relative(
     normalizePathForComparison(parent),
     normalizePathForComparison(child)
   )
-  return relative === '' || (
-    !path.isAbsolute(relative) &&
-    relative !== '..' &&
-    !relative.startsWith(`..${path.sep}`)
-  )
-}
-
-function repositoryRelativePath(candidate, root) {
-  const relative = path.relative(
-    normalizePathForComparison(root),
-    normalizePathForComparison(candidate)
-  )
-  if (path.isAbsolute(relative) || relative === '..' || relative.startsWith(`..${path.sep}`)) {
-    return null
-  }
-  return relative
-}
-
-function normalizeRepositoryRelativePath(relative) {
-  const normalized = relative.split(path.sep).join('/')
-  return process.platform === 'win32' ? normalized.toLowerCase() : normalized
+  return (
+    path.isAbsolute(relative) ||
+    relative === '..' ||
+    relative.startsWith(`..${path.sep}`)
+  ) ? null : relative
 }
 
 // Keep this list aligned with .gitignore. Only direct children of tools/ that
 // Git already ignores may hold a repository-internal configuration; everything
 // else must live outside the repository.
 function isAllowedRepositoryConfigRelative(relative) {
-  const normalized = normalizeRepositoryRelativePath(relative)
+  const normalizedPath = relative.split(path.sep).join('/')
+  const normalized = process.platform === 'win32'
+    ? normalizedPath.toLowerCase()
+    : normalizedPath
   if (!normalized.includes('/') && (
     normalized === '.env' ||
     (normalized.startsWith('.env.') && normalized !== '.env.example')
   )) {
     return true
   }
-  if (normalized === 'tools/api-key.txt') return true
   if (!normalized.startsWith('tools/')) return false
 
   const fileName = normalized.slice('tools/'.length)
   if (!fileName || fileName.includes('/')) return false
   return fileName === '.env'
     || fileName.startsWith('.env.')
-    || fileName.startsWith('api-key.')
+    || fileName === 'model-config.yaml'
+    || fileName === 'model-config.yml'
+    || fileName === 'model-config.json'
     || fileName.endsWith('.key')
     || fileName.endsWith('.pem')
     || /^.+\.secret\..+$/.test(fileName)
@@ -162,13 +150,15 @@ function isAllowedRepositoryConfigRelative(relative) {
 
 function assertConfigNotInDocs(candidate, docsPaths) {
   for (const docsPath of docsPaths) {
-    if (isPathInside(docsPath, candidate)) throw configError(DOCS_CONFIG_ERROR)
+    if (relativePathWithin(docsPath, candidate) !== null) {
+      throw configError(DOCS_CONFIG_ERROR)
+    }
   }
 }
 
 function assertRepositoryConfigAllowed(candidate, repositoryRoots) {
   for (const root of repositoryRoots) {
-    const relative = repositoryRelativePath(candidate, root)
+    const relative = relativePathWithin(root, candidate)
     if (relative !== null && !isAllowedRepositoryConfigRelative(relative)) {
       throw configError(UNSAFE_REPOSITORY_CONFIG_ERROR)
     }
@@ -529,22 +519,20 @@ function validateCompletion(body, requestedModelId) {
   return message.content
 }
 
-function cancelBody(response) {
+function cancelQuietly(target) {
   try {
-    const result = response?.body?.cancel?.()
+    const result = target?.cancel?.()
     if (result && typeof result.catch === 'function') result.catch(() => {})
   } catch {
-    // The body may already be closed or absent.
+    // The body or reader may already be closed, errored, or absent.
   }
 }
 
-function cancelReader(reader) {
-  try {
-    const result = reader?.cancel?.()
-    if (result && typeof result.catch === 'function') result.catch(() => {})
-  } catch {
-    // The stream may already be closed or errored.
-  }
+function isPassThroughModelError(error) {
+  return Boolean(error?.__aiModelAbort) ||
+    error?.code === 'MODEL_TIMEOUT' ||
+    error?.code === 'ABORT_ERR' ||
+    error?.code === 'MODEL_RESPONSE_ERROR'
 }
 
 async function readStreamText(reader, maxBytes, waitWithAbort) {
@@ -580,14 +568,7 @@ async function readStreamText(reader, maxBytes, waitWithAbort) {
     }
     return parts.join('')
   } catch (error) {
-    if (
-      error?.__aiModelAbort ||
-      error?.code === 'MODEL_TIMEOUT' ||
-      error?.code === 'ABORT_ERR' ||
-      error?.code === 'MODEL_RESPONSE_ERROR'
-    ) {
-      throw error
-    }
+    if (isPassThroughModelError(error)) throw error
     throw responseError('无法读取模型响应')
   }
 }
@@ -595,14 +576,14 @@ async function readStreamText(reader, maxBytes, waitWithAbort) {
 async function readResponseText(response, maxBytes, waitWithAbort) {
   const contentType = response.headers?.get?.('content-type')
   if (contentType && !/\b(?:application|text)\/json\b/i.test(contentType)) {
-    cancelBody(response)
+    cancelQuietly(response?.body)
     throw responseError('模型服务返回了非 JSON 响应')
   }
 
   const contentLength = response.headers?.get?.('content-length')
   if (typeof contentLength === 'string' && /^\d+$/.test(contentLength)) {
     if (Number(contentLength) > maxBytes) {
-      cancelBody(response)
+      cancelQuietly(response?.body)
       throw responseError('模型响应过大')
     }
   }
@@ -618,7 +599,7 @@ async function readResponseText(response, maxBytes, waitWithAbort) {
     try {
       return await readStreamText(reader, maxBytes, waitWithAbort)
     } catch (error) {
-      cancelReader(reader)
+      cancelQuietly(reader)
       throw error
     } finally {
       try {
@@ -634,13 +615,7 @@ async function readResponseText(response, maxBytes, waitWithAbort) {
   try {
     text = await waitWithAbort(Promise.resolve().then(() => response.text()))
   } catch (error) {
-    if (
-      error?.__aiModelAbort ||
-      error?.code === 'MODEL_TIMEOUT' ||
-      error?.code === 'ABORT_ERR'
-    ) {
-      throw error
-    }
+    if (isPassThroughModelError(error)) throw error
     throw responseError('无法读取模型响应')
   }
   if (typeof text !== 'string') throw responseError('模型响应不是文本')
@@ -777,17 +752,10 @@ export async function requestModel(options = {}) {
 
   const controller = new AbortController()
   let timedOut = false
-  let userAborted = false
 
-  const onExternalAbort = () => {
-    userAborted = true
-    controller.abort()
-  }
+  const onExternalAbort = () => controller.abort()
   signal?.addEventListener('abort', onExternalAbort, { once: true })
-  if (signal?.aborted) {
-    userAborted = true
-    controller.abort()
-  }
+  if (signal?.aborted) controller.abort()
 
   let rejectAbort
   const abortPromise = new Promise((_, reject) => {
@@ -822,7 +790,7 @@ export async function requestModel(options = {}) {
   }
 
   try {
-    if (userAborted) throw abortError()
+    if (signal?.aborted) throw abortError()
 
     let response
     try {
@@ -841,18 +809,18 @@ export async function requestModel(options = {}) {
       )
     } catch (error) {
       if (error?.name === 'AbortError' || error?.__aiModelAbort) throw rethrowAbort()
-      if (userAborted) throw abortError()
+      if (signal?.aborted) throw abortError()
       if (timedOut) throw timeoutError(timeout)
       throw modelError('模型请求失败：无法连接模型服务', 'MODEL_NETWORK_ERROR')
     }
 
     const status = response?.status
     if (!Number.isInteger(status) || status < 100 || status > 599) {
-      cancelBody(response)
+      cancelQuietly(response?.body)
       throw responseError('模型服务返回了无效的 HTTP 状态')
     }
     if (status !== 200) {
-      cancelBody(response)
+      cancelQuietly(response?.body)
       const error = modelError(
         `模型请求失败：HTTP ${status}（${safeHttpCategory(status)}）`,
         'MODEL_HTTP_ERROR'

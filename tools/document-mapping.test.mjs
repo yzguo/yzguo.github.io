@@ -25,13 +25,13 @@ test('Chinese proper names inside content do not mark an English filename', () =
 })
 
 test('internal /zh-cn/ targets are localized without touching external URLs', () => {
-  assert.equal(localizeInternalHref('/zh-cn/Blogs/'), '/Blogs/')
+  assert.equal(localizeInternalHref('/zh-cn/Notes/'), '/Notes/')
   assert.equal(localizeInternalHref('/zh-cn'), '/')
   assert.equal(localizeInternalHref('/zh-cn?x=1'), '/?x=1')
   assert.equal(localizeInternalHref('/zh-cn#top'), '/#top')
-  assert.equal(localizeInternalHref('/Blogs/'), '/Blogs/')
+  assert.equal(localizeInternalHref('/Notes/'), '/Notes/')
   assert.equal(localizeInternalHref('https://example.com/zh-cn/'), 'https://example.com/zh-cn/')
-  assert.equal(localizeInternalHref('zh-cn/Blogs/'), 'zh-cn/Blogs/')
+  assert.equal(localizeInternalHref('zh-cn/Notes/'), 'zh-cn/Notes/')
 })
 
 test('path containment rejects traversal and absolute siblings', () => {

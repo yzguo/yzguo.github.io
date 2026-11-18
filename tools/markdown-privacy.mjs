@@ -6,7 +6,6 @@ import {
   isSeq,
   parseDocument
 } from 'yaml'
-import { hasCjk } from './document-mapping.mjs'
 
 // Content sent to the local model must not include private notes. HTML comments
 // are treated as private by default. An explicit private block
@@ -622,5 +621,3 @@ export function assertNoPrivateContent(text, label = 'generated English') {
     throw new PrivacyError(`${label} contains private content: ${issues.join(', ')}`)
   }
 }
-
-export { hasCjk, isPrivateKey }

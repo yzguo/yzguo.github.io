@@ -56,10 +56,7 @@ import {
     resolveFileSystemOps,
     resolveProtectedResource,
 } from './ai-search-config.mjs'
-import {
-    sanitizeMarkdownForModel,
-    splitMarkdownDocument,
-} from '../scripts/markdown-privacy.mjs'
+import { sanitizeMarkdownForModel } from './markdown-privacy.mjs'
 
 export const AI_SEARCH_PATH = '/__ai-search'
 export const MAX_BODY_BYTES = 8 * 1024
@@ -71,8 +68,6 @@ export const MAX_MODEL_TIMEOUT_MS = 2_147_483_647
 export const MAX_CONCURRENT_MODEL_REQUESTS = 1
 
 /** Canonical language ids used internally. */
-export const LANGUAGES = Object.freeze(['en', 'zh'])
-
 const LANGUAGE_ALIASES = new Map([
     ['en', 'en'],
     ['en-us', 'en'],
@@ -188,6 +183,13 @@ const ERROR_MESSAGES = {
         forbidden: '不允许该 AI 搜索请求。',
     },
 }
+
+const RESULT_RESPONSES = Object.freeze({
+    busy: { status: 429, headers: { 'Retry-After': '1' } },
+    no_results: { status: 200, headers: {} },
+    timeout: { status: 504, headers: {} },
+    model_error: { status: 502, headers: {} },
+})
 
 class HttpError extends Error {
     constructor(status, code, message) {
@@ -524,7 +526,6 @@ function cleanMarkdown(value) {
     const text = stripControlCharacters(value)
         .replace(/^\s{0,3}>\s?/gm, '')
         .replace(/^\s{0,3}(?:[-*+]|\d+[.)])\s+/gm, '')
-        .replace(/^\s*(?:```+|~~~+).*$/gm, '')
         .replace(/^\s*:::\s*.*$/gm, '')
         .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
         .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
@@ -543,8 +544,7 @@ function cleanMarkdown(value) {
 function splitSections(markdown) {
     const lines = markdown.split('\n')
     const sections = []
-    let current = { level: 0, heading: '', lines: [] }
-    let fence = null
+    let current = { heading: '', lines: [] }
     let firstHeading = ''
     let pageTitle = ''
 
@@ -552,46 +552,27 @@ function splitSections(markdown) {
         const text = cleanMarkdown(current.lines.join('\n'))
         if (current.heading || text) {
             sections.push({
-                level: current.level,
                 heading: current.heading,
                 text,
             })
         }
     }
 
+    // Code blocks were already blanked by stripFencedCodeBlocks, so a fence
+    // state machine here would never see a fence boundary.
     for (const line of lines) {
-        const fenceMatch = /^\s*(`{3,}|~{3,})(.*)$/u.exec(line)
-        if (fenceMatch) {
-            const marker = fenceMatch[1]
-            if (!fence) {
-                fence = { character: marker[0], length: marker.length }
-            } else if (
-                marker[0] === fence.character &&
-                marker.length >= fence.length &&
-                fenceMatch[2].trim() === ''
-            ) {
-                fence = null
+        const heading = /^(#{1,6})\s+(.+?)\s*#*\s*$/u.exec(line)
+        if (heading) {
+            flush()
+            const text = stripInlineMarkdown(heading[2])
+            if (!firstHeading) firstHeading = text
+            if (!pageTitle && heading[1].length === 1) pageTitle = text
+            current = {
+                heading: text,
+                lines: [],
             }
-            current.lines.push(line)
             continue
         }
-
-        if (!fence) {
-            const heading = /^(#{1,6})\s+(.+?)\s*#*\s*$/u.exec(line)
-            if (heading) {
-                flush()
-                const text = stripInlineMarkdown(heading[2])
-                if (!firstHeading) firstHeading = text
-                if (!pageTitle && heading[1].length === 1) pageTitle = text
-                current = {
-                    level: heading[1].length,
-                    heading: text,
-                    lines: [],
-                }
-                continue
-            }
-        }
-
         current.lines.push(line)
     }
 
@@ -641,24 +622,20 @@ export async function parseMarkdownPage(
         return null
     }
 
-    let privateSafe
-    try {
-        // Prefix a newline so a body-level horizontal rule (`---`) cannot be
-        // mistaken for front matter by the shared privacy sanitizer.
-        privateSafe = sanitizeMarkdownForModel('\n' + withoutCode, {
-            stripAllComments: true,
-        })
-    } catch {
-        return null
-    }
-
-    const body = splitMarkdownDocument(privateSafe).body
     let safeBody
     try {
-        safeBody = stripScriptStyleBlocks(body)
+        // Prefix a newline so a body-level horizontal rule (`---`) cannot be
+        // mistaken for front matter by the shared privacy sanitizer. Because
+        // the input no longer starts with front matter, the sanitizer's return
+        // value is already the sanitized body.
+        safeBody = stripScriptStyleBlocks(
+            sanitizeMarkdownForModel('\n' + withoutCode, {
+                stripAllComments: true,
+            })
+        )
     } catch {
-        // Raw script/style text is never indexed when its boundaries are
-        // ambiguous. Drop the whole page rather than risk sending its body.
+        // Unclosed private blocks and ambiguous raw script/style boundaries
+        // drop the whole page rather than risk indexing its body.
         return null
     }
 
@@ -1199,14 +1176,6 @@ function isJsonContentType(value) {
     return true
 }
 
-function requestPathname(rawUrl) {
-    try {
-        return new URL(rawUrl || '/', 'http://localhost').pathname
-    } catch {
-        return null
-    }
-}
-
 async function readRequestBody(request, maximumBytes) {
     const contentLength = singleHeader(request.headers['content-length'])
     if (contentLength !== undefined) {
@@ -1303,10 +1272,9 @@ function validatePayload(payload) {
     return { query, lang: language }
 }
 
-function sendJson(response, status, payload, extraHeaders = {}) {
-    const body = Buffer.from(JSON.stringify(payload), 'utf8')
+function sendBody(response, status, body, contentType, extraHeaders = {}) {
     response.statusCode = status
-    response.setHeader('Content-Type', 'application/json; charset=utf-8')
+    response.setHeader('Content-Type', contentType)
     response.setHeader('Content-Length', String(body.length))
     response.setHeader('Cache-Control', 'no-store')
     response.setHeader('X-Content-Type-Options', 'nosniff')
@@ -1315,6 +1283,16 @@ function sendJson(response, status, payload, extraHeaders = {}) {
         response.setHeader(name, value)
     }
     response.end(body)
+}
+
+function sendJson(response, status, payload, extraHeaders = {}) {
+    sendBody(
+        response,
+        status,
+        Buffer.from(JSON.stringify(payload), 'utf8'),
+        'application/json; charset=utf-8',
+        extraHeaders
+    )
 }
 
 function normalizeTimeoutMs(value) {
@@ -1339,7 +1317,7 @@ export function resolveModelTimeoutMs(value = process.env.AI_REQUEST_TIMEOUT_MS)
 
 /**
  * The Vite dev server normally serves any file inside its workspace root,
- * including `tools/api-key.txt` through `/@fs/`. This guard fails closed for
+ * including `tools/model-config.yaml` through `/@fs/`. This guard fails closed for
  * private model configuration and for symlink escapes out of the directories
  * the site actually needs (docs, docs/public, node_modules).
  *
@@ -1411,12 +1389,14 @@ export function createFileAccessGuard(options = {}) {
 
     const fsOps = resolveFileSystemOps(options.fs)
     const baseDirectory = path.resolve(options.baseDir || process.cwd())
-    const allowedRoots = []
+    const allowedRootPaths = []
+    const allowedRootKeys = new Set()
     for (const value of allowedRootValues) {
         if (typeof value !== 'string' || value.trim() === '') {
             throw new TypeError('Every allowed root must be a non-empty path')
         }
         const lexical = path.resolve(value)
+        allowedRootPaths.push(lexical)
         let canonical = lexical
         try {
             canonical = canonicalizeFilePath(lexical, fsOps)
@@ -1424,15 +1404,27 @@ export function createFileAccessGuard(options = {}) {
             // A missing allowed root is not a secret leak; keep its lexical
             // path so startup is not broken before dependencies are installed.
         }
-        allowedRoots.push({ lexicalKey: pathKey(lexical) })
-        allowedRoots.push({ lexicalKey: pathKey(canonical) })
+        allowedRootKeys.add(pathKey(lexical))
+        allowedRootKeys.add(pathKey(canonical))
     }
 
     const protectedSpecs = []
-    const apiKeyPath =
-        options.apiKeyPath ??
-        path.join(options.repoRoot || baseDirectory, 'tools', 'api-key.txt')
-    protectedSpecs.push({ value: apiKeyPath, label: 'AI key' })
+    const defaultModelConfigPath = path.join(
+        options.repoRoot || baseDirectory,
+        'tools',
+        'model-config.yaml'
+    )
+    const modelConfigPath = options.modelConfigPath ?? defaultModelConfigPath
+    protectedSpecs.push({
+        value: modelConfigPath,
+        label: 'Private model configuration',
+    })
+    if (pathKey(modelConfigPath) !== pathKey(defaultModelConfigPath)) {
+        protectedSpecs.push({
+            value: defaultModelConfigPath,
+            label: 'Private model configuration',
+        })
+    }
 
     let aiModelConfig
     if (
@@ -1468,21 +1460,15 @@ export function createFileAccessGuard(options = {}) {
 
     // Validate at startup only; identities are re-read for every request so a
     // key created or replaced after startup cannot leave a stale cache.
-    const startupEntries = []
+    const observedIdentities = new Set()
     for (const spec of protectedSpecs) {
-        startupEntries.push(
-            resolveProtectedResource(spec.value, {
-                baseDirectory,
-                fs: fsOps,
-                label: spec.label,
-            })
-        )
+        const entry = resolveProtectedResource(spec.value, {
+            baseDirectory,
+            fs: fsOps,
+            label: spec.label,
+        })
+        if (entry.identity) observedIdentities.add(entry.identity)
     }
-    const observedIdentities = new Set(
-        startupEntries
-            .map((entry) => entry.identity)
-            .filter((value) => typeof value === 'string')
-    )
 
     const refreshProtectedEntries = () => {
         const entries = []
@@ -1551,9 +1537,10 @@ export function createFileAccessGuard(options = {}) {
             }
         }
 
-        return allowedRoots.some((root) =>
-            isWithinPath(root.lexicalKey, canonicalKey)
-        )
+        for (const rootKey of allowedRootKeys) {
+            if (isWithinPath(rootKey, canonicalKey)) return true
+        }
+        return false
     }
 
     return function fileAccessGuard(request, response, next) {
@@ -1592,13 +1579,13 @@ export function createFileAccessGuard(options = {}) {
             if (target) {
                 targets.push(target)
             } else {
-                for (const root of allowedRootViews(allowedRootValues)) {
+                for (const root of allowedRootPaths) {
                     targets.push(path.resolve(root, id))
                 }
             }
         } else {
             const relative = pathname.slice(1)
-            for (const root of allowedRootViews(allowedRootValues)) {
+            for (const root of allowedRootPaths) {
                 targets.push(path.resolve(root, relative))
             }
         }
@@ -1615,18 +1602,13 @@ export function createFileAccessGuard(options = {}) {
     }
 }
 
-function allowedRootViews(values) {
-    return values.map((value) => path.resolve(value))
-}
-
 function sendForbidden(response) {
-    const body = Buffer.from('Forbidden', 'utf8')
-    response.statusCode = 403
-    response.setHeader('Content-Type', 'text/plain; charset=utf-8')
-    response.setHeader('Content-Length', String(body.length))
-    response.setHeader('Cache-Control', 'no-store')
-    response.setHeader('X-Content-Type-Options', 'nosniff')
-    response.end(body)
+    sendBody(
+        response,
+        403,
+        Buffer.from('Forbidden', 'utf8'),
+        'text/plain; charset=utf-8'
+    )
 }
 
 /**
@@ -1780,8 +1762,14 @@ export function createAiSearchService(options = {}) {
     }
 
     async function handle(request, response, next = () => {}) {
-        const pathname = requestPathname(request.url)
-        if (pathname !== AI_SEARCH_PATH) {
+        let parsedUrl
+        try {
+            parsedUrl = new URL(request.url || '/', 'http://localhost')
+        } catch {
+            next()
+            return
+        }
+        if (parsedUrl.pathname !== AI_SEARCH_PATH) {
             next()
             return
         }
@@ -1823,16 +1811,6 @@ export function createAiSearchService(options = {}) {
                 )
             }
 
-            let parsedUrl
-            try {
-                parsedUrl = new URL(request.url || '/', 'http://localhost')
-            } catch {
-                throw new HttpError(
-                    400,
-                    'invalid_request',
-                    'The request URL is invalid.'
-                )
-            }
             if (parsedUrl.search) {
                 throw new HttpError(
                     400,
@@ -1882,20 +1860,6 @@ export function createAiSearchService(options = {}) {
                 return
             }
 
-            if (result.status === 'busy') {
-                sendJson(
-                    response,
-                    429,
-                    {
-                        ok: false,
-                        code: 'busy',
-                        message: messageFor(responseLanguage, 'busy'),
-                    },
-                    { 'Retry-After': '1' }
-                )
-                return
-            }
-
             if (result.status === 'ok') {
                 sendJson(response, 200, {
                     ok: true,
@@ -1905,21 +1869,18 @@ export function createAiSearchService(options = {}) {
                 return
             }
 
-            if (result.status === 'no_results') {
-                sendJson(response, 200, {
-                    ok: false,
-                    code: 'no_results',
-                    message: messageFor(responseLanguage, 'no_results'),
-                })
-                return
-            }
-
-            if (result.status === 'timeout') {
-                sendJson(response, 504, {
-                    ok: false,
-                    code: 'timeout',
-                    message: messageFor(responseLanguage, 'timeout'),
-                })
+            const failure = RESULT_RESPONSES[result.status]
+            if (failure) {
+                sendJson(
+                    response,
+                    failure.status,
+                    {
+                        ok: false,
+                        code: result.status,
+                        message: messageFor(responseLanguage, result.status),
+                    },
+                    failure.headers
+                )
                 return
             }
 
@@ -2021,9 +1982,9 @@ export function attachLocalAiSearch(server, options = {}) {
         allowedRoots,
         baseDir: options.baseDir || process.cwd(),
         repoRoot,
-        apiKeyPath:
-            options.apiKeyPath ||
-            path.join(repoRoot, 'tools', 'api-key.txt'),
+        ...(options.modelConfigPath
+            ? { modelConfigPath: options.modelConfigPath }
+            : {}),
         ...(Object.prototype.hasOwnProperty.call(options, 'aiModelConfig')
             ? { aiModelConfig: options.aiModelConfig }
             : {}),

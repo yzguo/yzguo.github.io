@@ -138,14 +138,14 @@ test('private regions in frontmatter are removed with their contents', () => {
     '<!-- private:start -->',
     'token: should-not-leak',
     '<!-- private:end -->',
-    'link: /zh-cn/Blogs/',
+    'link: /zh-cn/Notes/',
     '---',
     '# 正文'
   ].join('\n')
   const sanitized = sanitizeMarkdownForModel(source)
   assert.doesNotMatch(sanitized, /should-not-leak|private:start|private:end/)
   assert.match(sanitized, /title: 标题/)
-  assert.match(sanitized, /link: \/zh-cn\/Blogs\//)
+  assert.match(sanitized, /link: \/zh-cn\/Notes\//)
 })
 
 test('splitMarkdownDocument preserves delimiters and body', () => {
@@ -469,8 +469,8 @@ test('valid public frontmatter keeps its parsed structure', () => {
     '    alt: 郭彦禛的头像',
     '  actions:',
     '    - theme: brand',
-    '      text: 博客与笔记',
-    '      link: /zh-cn/Blogs/',
+    '      text: 笔记',
+    '      link: /zh-cn/Notes/',
     'features:',
     '  - title: 项目',
     '    details: 说明',

@@ -91,10 +91,10 @@ function aiSearchPlugin(): Plugin {
             scanPublishableResources({
                 docsRoot: docsDirectory,
                 publicDir: publicDirectory,
-                apiKeyPath: path.join(
+                modelConfigPath: path.join(
                     repositoryRoot,
                     'tools',
-                    'api-key.txt'
+                    'model-config.yaml'
                 ),
                 aiModelConfig: process.env.AI_MODEL_CONFIG,
                 repositoryRoot,
@@ -104,6 +104,18 @@ function aiSearchPlugin(): Plugin {
     }
 }
 
+/*
+ * Mermaid is imported only on demand by LocalMermaid.vue. Rolldown therefore
+ * emits the Mermaid runtime, one lazy chunk per diagram type, and the parser
+ * package as separate lazy chunks. Do not add a catch-all Mermaid group: it
+ * would merge diagram-only code and make unrelated renderers load together.
+ *
+ * @mermaid-js/parser ships its Langium/Chevrotain/VSCode dependency graph as
+ * one pre-bundled module. Rolldown splits only between modules, so that single
+ * lazy module cannot be reduced without patching the dependency. Its build
+ * warning is left visible; chunkSizeWarningLimit and warning filters are not
+ * changed.
+ */
 export default defineConfig({
     ...shared,
     ...headConfig,
@@ -130,7 +142,7 @@ export default defineConfig({
             fs: {
                 // Vite's default deny list (.env, key material, .git, etc.)
                 // stays in effect; only the allow list is narrowed so tools/,
-                // scripts/, README, and repository config are not served.
+                // README, and repository configuration are not served.
                 // Do not set `deny` here: a user-provided deny array would
                 // replace Vite's built-in defaults.
                 strict: true,

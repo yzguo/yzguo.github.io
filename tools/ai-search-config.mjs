@@ -34,6 +34,7 @@ const PRIVATE_FILE_NAMES = [
     /^\.npmrc$/iu,
     /^\.yarnrc\.yml$/iu,
     /^api-key(?:\.(?:txt|ya?ml|json|env|key|crt|pem))?[. ]*$/iu,
+    /^model-config(?:[. ]|$)/iu,
     /\.(?:crt|pem|key|p12|pfx|cer|der)[. ]*$/iu,
     /\.(?:secret|private|local)\./iu,
 ]
@@ -177,7 +178,9 @@ function isAllowedRepositoryConfigPath(relativePath) {
 
     const name = segments[1]
     return (
-        name.startsWith('api-key.') ||
+        name === 'model-config.yaml' ||
+        name === 'model-config.yml' ||
+        name === 'model-config.json' ||
         name.endsWith('.key') ||
         name.endsWith('.pem') ||
         name.includes('.secret.') ||
@@ -276,7 +279,7 @@ export function assertPrivateModelConfigPlacement({
 export function scanPublishableResources({
     docsRoot,
     publicDir,
-    apiKeyPath,
+    modelConfigPath,
     aiModelConfig,
     protectedFiles = [],
     repositoryRoot,
@@ -313,9 +316,14 @@ export function scanPublishableResources({
     }
 
     const protectedEntries = []
+    const defaultModelConfigPath = path.join(
+        resolvedRepositoryRoot,
+        'tools',
+        'model-config.yaml'
+    )
     const protectedValues = [
-        apiKeyPath ||
-            path.join(resolvedRepositoryRoot, 'tools', 'api-key.txt'),
+        modelConfigPath || defaultModelConfigPath,
+        ...(modelConfigPath ? [defaultModelConfigPath] : []),
         ...(aiModelConfig ? [aiModelConfig] : []),
         ...protectedFiles,
     ]
@@ -399,10 +407,7 @@ export function scanPublishableResources({
             }
             if (
                 !fileStats.isDirectory() &&
-                fileStats.ino > 0 &&
-                protectedIdentities.has(
-                    `${fileStats.dev}:${fileStats.ino}`
-                )
+                protectedIdentities.has(fileIdentity(fileStats))
             ) {
                 throw failure()
             }

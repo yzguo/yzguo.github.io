@@ -8,12 +8,12 @@ export const zh_cn = defineConfig({
         nav: [
             { text: '关于', link: '/zh-cn/About/', activeMatch: '^/zh-cn/About/' },
             { text: '项目', link: '/zh-cn/Projects/', activeMatch: '^/zh-cn/Projects/' },
-            { text: '博客与笔记', link: '/zh-cn/Blogs/', activeMatch: '^/zh-cn/Blogs/' }
+            { text: '笔记', link: '/zh-cn/Notes/', activeMatch: '^/zh-cn/Notes/' }
         ],
         sidebar: {
             '/zh-cn/About/': sidebarAbout(),
             '/zh-cn/Projects/': sidebarProjects(),
-            '/zh-cn/Blogs/': sidebarBlogs()
+            '/zh-cn/Notes/': sidebarNotes()
         },
         editLink: {
             pattern: 'https://github.com/yzguo/yzguo.github.io/edit/main/docs/:path',
@@ -39,25 +39,25 @@ function sidebarProjects(): DefaultTheme.SidebarItem[] {
     return [{ text: '项目', link: '/zh-cn/Projects/' }]
 }
 
-function sidebarBlogs(): DefaultTheme.SidebarItem[] {
+function sidebarNotes(): DefaultTheme.SidebarItem[] {
     return [{
-        text: '博客与笔记',
-        link: '/zh-cn/Blogs/',
+        text: '笔记',
+        link: '/zh-cn/Notes/',
         items: [
             {
                 text: '课程笔记',
-                link: '/zh-cn/Blogs/Courses/',
-                items: [{ text: '课程笔记演示', link: '/zh-cn/Blogs/Courses/demo' }]
+                link: '/zh-cn/Notes/Courses/',
+                items: [{ text: '课程笔记演示', link: '/zh-cn/Notes/Courses/demo' }]
             },
             {
                 text: '学习笔记',
-                link: '/zh-cn/Blogs/Learning/',
-                items: [{ text: '学习笔记演示', link: '/zh-cn/Blogs/Learning/demo' }]
+                link: '/zh-cn/Notes/Learning/',
+                items: [{ text: '学习笔记演示', link: '/zh-cn/Notes/Learning/demo' }]
             },
             {
                 text: '工作笔记',
-                link: '/zh-cn/Blogs/Work/',
-                items: [{ text: '工作笔记演示', link: '/zh-cn/Blogs/Work/demo' }]
+                link: '/zh-cn/Notes/Work/',
+                items: [{ text: '工作笔记演示', link: '/zh-cn/Notes/Work/demo' }]
             }
         ]
     }]

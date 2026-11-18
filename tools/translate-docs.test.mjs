@@ -12,7 +12,7 @@ const dictionary = new Map([
   ['欢迎', 'Welcome'],
   ['第一段', 'First paragraph.'],
   ['第二段', 'Second paragraph.'],
-  ['博客', 'Blogs'],
+  ['笔记', 'Notes'],
   ['关于', 'About'],
   ['第一项', 'First item'],
   ['第二项', 'Second item'],
@@ -126,7 +126,7 @@ async function parserFor(rootDir) {
 test('translation sources cover docs, README, and root Chinese documents only', async (t) => {
   const rootDir = await makeProject(t, {
     'docs/zh-cn/index.md': '# 标题\n\n欢迎。\n',
-    'docs/zh-cn/Blogs/demo.md': '# 博客\n\n正文。\n',
+    'docs/zh-cn/Notes/demo.md': '# 笔记\n\n正文。\n',
     'docs/index.md': '# Existing English\n',
     'English.md': '# English page\n\n提到了中文专名。\n',
     '网站问题排查与优化方案.md': '# 根文档\n'
@@ -138,7 +138,7 @@ test('translation sources cover docs, README, and root Chinese documents only', 
     collection.sources.map((source) => [source.sourcePath, source.targetPath]),
     [
       ['README.zh-CN.md', 'README.md'],
-      ['docs/zh-cn/Blogs/demo.md', 'docs/Blogs/demo.md'],
+      ['docs/zh-cn/Notes/demo.md', 'docs/Notes/demo.md'],
       ['docs/zh-cn/index.md', 'docs/index.md'],
       ['网站问题排查与优化方案.md', '网站问题排查与优化方案.en.md']
     ]
@@ -150,7 +150,7 @@ test('generated English preserves code, math, links, and never includes private 
     'docs/zh-cn/index.md': [
       '---',
       'title: 标题',
-      'link: /zh-cn/Blogs/',
+      'link: /zh-cn/Notes/',
       '---',
       '',
       '# 标题',
@@ -172,7 +172,7 @@ test('generated English preserves code, math, links, and never includes private 
       '    B --> C[周期 T]',
       '```',
       '',
-      '[博客](/zh-cn/Blogs/)',
+      '[笔记](/zh-cn/Notes/)',
       '',
       '<!-- private:start -->',
       '这段内容绝不能发送或写入。',
@@ -200,8 +200,8 @@ test('generated English preserves code, math, links, and never includes private 
     english,
     /```mermaid\nflowchart TD\n    A\[Small angle\] --> B\[Equation of motion\]\n    B --> C\[Period T\]\n```/
   )
-  assert.match(english, /\[Blogs\]\(\/Blogs\/\)/)
-  assert.match(english, /link: \/Blogs\//)
+  assert.match(english, /\[Notes\]\(\/Notes\/\)/)
+  assert.match(english, /link: \/Notes\//)
   assert.doesNotMatch(english, /私密注记|这段内容|private:start/)
   assert.doesNotMatch(prompts.map((entry) => entry.prompt).join('\n'), /私密注记|这段内容|private:start/)
 })
@@ -400,7 +400,7 @@ test('long tables, links, and inline code are translated in bounded segments', a
   const source = [
     '# 标题',
     '',
-    '第一段包含 [链接](/zh-cn/Blogs/) 和 `行内代码`。',
+    '第一段包含 [链接](/zh-cn/Notes/) 和 `行内代码`。',
     '',
     '| 名称 | 代码 | 说明 |',
     '| --- | --- | --- |',
@@ -545,8 +545,8 @@ test('missing fragment responses and semantic mismatches fail without writing', 
 
 test('main is a safe plan by default and writes only missing English files', async (t) => {
   const rootDir = await makeProject(t, {
-    'docs/zh-cn/index.md': '---\ntitle: 标题\nlink: /zh-cn/Blogs/\n---\n\n# 标题\n\n欢迎。\n',
-    'docs/zh-cn/Blogs/demo.md': '# 博客\n\n正文。\n',
+    'docs/zh-cn/index.md': '---\ntitle: 标题\nlink: /zh-cn/Notes/\n---\n\n# 标题\n\n欢迎。\n',
+    'docs/zh-cn/Notes/demo.md': '# 笔记\n\n正文。\n',
     '网站问题排查与优化方案.md': '# 根文档\n'
   })
   const { requestModel, prompts } = fakeModel()
@@ -569,8 +569,8 @@ test('main is a safe plan by default and writes only missing English files', asy
   assert.equal(await readFile(path.join(rootDir, 'README.md'), 'utf8'), '# Manual English\n\nDo not overwrite.\n')
   const docsIndex = await readFile(path.join(rootDir, 'docs/index.md'), 'utf8')
   assert.match(docsIndex, /# Title/)
-  assert.match(docsIndex, /link: \/Blogs\//)
-  assert.match(await readFile(path.join(rootDir, 'docs/Blogs/demo.md'), 'utf8'), /# Blogs/)
+  assert.match(docsIndex, /link: \/Notes\//)
+  assert.match(await readFile(path.join(rootDir, 'docs/Notes/demo.md'), 'utf8'), /# Notes/)
   assert.match(await readFile(path.join(rootDir, '网站问题排查与优化方案.en.md'), 'utf8'), /# Root document\./)
 })
 
@@ -601,7 +601,7 @@ test('force is required to replace manual English and only works with write', as
 test('a failure in any file prevents every generated write', async (t) => {
   const rootDir = await makeProject(t, {
     'docs/zh-cn/a.md': '# 标题\n\n欢迎。\n',
-    'docs/zh-cn/b.md': '# 博客\n\n正文。\n'
+    'docs/zh-cn/b.md': '# 笔记\n\n正文。\n'
   })
   const { requestModel, prompts } = fakeModel({
     bodyResponse: (body) => {
@@ -628,7 +628,7 @@ test('a failure in any file prevents every generated write', async (t) => {
 test('the CLI can target an isolated root and a single pair for real-model E2E', async (t) => {
   const rootDir = await makeProject(t, {
     'docs/zh-cn/index.md': '# 标题\n\n欢迎。\n',
-    'docs/zh-cn/other.md': '# 博客\n\n正文。\n'
+    'docs/zh-cn/other.md': '# 笔记\n\n正文。\n'
   })
   const { requestModel, prompts } = fakeModel()
   const errors = []

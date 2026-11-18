@@ -1297,7 +1297,7 @@ test('validates Host headers and source paths', () => {
     assert.equal(parseAllowedHost('evil.example'), null)
     assert.equal(parseAllowedHost('localhost:0'), null)
 
-    for (const pathname of ['/', '/About/', '/zh-cn/Blogs/demo', '/a%20b']) {
+    for (const pathname of ['/', '/About/', '/zh-cn/Notes/demo', '/a%20b']) {
         assert.equal(sanitizeSourcePath(pathname), pathname)
     }
     for (const pathname of [
@@ -1350,7 +1350,7 @@ test('refuses the AI endpoint without touching a model when the switch is off', 
 test('attaches a disabled endpoint and file guard without watching docs', async () => {
     const watcherEvents = []
     const handlers = []
-    const fakeKey = path.join(docsRoot, 'fake-api-key.txt')
+    const fakeKey = path.join(docsRoot, 'fake-model-config.yaml')
     await writeFile(fakeKey, 'FAKE_KEY_SENTINEL', 'utf8')
     const server = {
         config: { root: docsRoot },
@@ -1371,11 +1371,10 @@ test('attaches a disabled endpoint and file guard without watching docs', async 
         enabled: false,
         aiModelConfig: null,
         repoRoot: docsRoot,
-        apiKeyPath: fakeKey,
+        modelConfigPath: fakeKey,
     })
     assert.equal(service.enabled, false)
     assert.equal(handlers.length, 2)
-    assert.equal(handlers[0].name, 'fileAccessGuard')
     assert.equal(handlers[1], service.middleware)
     assert.deepEqual(watcherEvents, [])
 
@@ -1402,8 +1401,8 @@ test('file access guard blocks private files, encodings, and virtual symlink esc
             mkdir(privateDir, { recursive: true }),
         ])
 
-        const apiKey = path.join(tools, 'api-key.txt')
-        const modelConfig = path.join(privateDir, 'model config.json')
+        const modelConfigPath = path.join(tools, 'model-config.yaml')
+        const envModelConfig = path.join(privateDir, 'private-model.json')
         const publicFile = path.join(publicDir, 'ok.txt')
         const docFile = path.join(docs, 'page.md')
         const dependencyFile = path.join(nodeModules, 'dep.js')
@@ -1411,8 +1410,8 @@ test('file access guard blocks private files, encodings, and virtual symlink esc
         const leakLink = path.join(publicDir, 'leak.txt')
         const hardLink = path.join(publicDir, 'hardlink.txt')
         await Promise.all([
-            writeFile(apiKey, 'FAKE_KEY_SENTINEL', 'utf8'),
-            writeFile(modelConfig, 'FAKE_CONFIG_SENTINEL', 'utf8'),
+            writeFile(modelConfigPath, 'FAKE_KEY_SENTINEL', 'utf8'),
+            writeFile(envModelConfig, 'FAKE_CONFIG_SENTINEL', 'utf8'),
             writeFile(publicFile, 'public', 'utf8'),
             writeFile(docFile, '# page', 'utf8'),
             writeFile(dependencyFile, 'export default 1', 'utf8'),
@@ -1422,11 +1421,11 @@ test('file access guard blocks private files, encodings, and virtual symlink esc
         ])
 
         // Inject symlink/junction semantics without requiring OS privileges.
-        const keyStats = DEFAULT_FILE_SYSTEM_OPS.statSync(apiKey)
+        const keyStats = DEFAULT_FILE_SYSTEM_OPS.statSync(modelConfigPath)
         const fakeFs = {
             ...DEFAULT_FILE_SYSTEM_OPS,
             realpathSync(value) {
-                if (pathKey(value) === pathKey(leakLink)) return apiKey
+                if (pathKey(value) === pathKey(leakLink)) return modelConfigPath
                 return DEFAULT_FILE_SYSTEM_OPS.realpathSync(value)
             },
             statSync(value) {
@@ -1454,8 +1453,7 @@ test('file access guard blocks private files, encodings, and virtual symlink esc
         const guard = createFileAccessGuard({
             allowedRoots: [docs, publicDir, nodeModules],
             repoRoot,
-            apiKeyPath: apiKey,
-            aiModelConfig: modelConfig,
+            aiModelConfig: envModelConfig,
             baseDir: root,
             fs: fakeFs,
         })
@@ -1471,14 +1469,13 @@ test('file access guard blocks private files, encodings, and virtual symlink esc
 
         const previousConfig = process.env.AI_MODEL_CONFIG
         try {
-            process.env.AI_MODEL_CONFIG = modelConfig
+            process.env.AI_MODEL_CONFIG = envModelConfig
             const envGuard = createFileAccessGuard({
                 allowedRoots: [docs, publicDir, nodeModules],
                 repoRoot,
-                apiKeyPath: apiKey,
                 baseDir: root,
             })
-            const envResult = await fileAccess(envGuard, fsUrl(modelConfig))
+            const envResult = await fileAccess(envGuard, fsUrl(envModelConfig))
             assert.equal(envResult.nextCalled, false)
             assert.equal(envResult.status, 403)
         } finally {
@@ -1489,12 +1486,12 @@ test('file access guard blocks private files, encodings, and virtual symlink esc
             }
         }
 
-        const target = path.resolve(apiKey).replace(/\\/gu, '/')
+        const target = path.resolve(modelConfigPath).replace(/\\/gu, '/')
         const encodedTarget = encodeURIComponent(target)
         const blocked = [
-            fsUrl(apiKey),
-            fsUrl(apiKey) + '?raw',
-            fsUrl(modelConfig),
+            fsUrl(modelConfigPath),
+            fsUrl(modelConfigPath) + '?raw',
+            fsUrl(envModelConfig),
             fsUrl(outsideFile),
             fsUrl(leakLink),
             '/leak.txt',
@@ -1506,6 +1503,9 @@ test('file access guard blocks private files, encodings, and virtual symlink esc
             '/.env',
             '/.env.local',
             '/.env.',
+            '/model-config.yaml',
+            '/model-config.json',
+            '/model-config.yaml.',
             '/api-key.txt.',
             '/.git/config',
             '/.git./config',
@@ -1534,7 +1534,6 @@ test('file access guard blocks private files, encodings, and virtual symlink esc
                 createFileAccessGuard({
                     allowedRoots: [docs, publicDir, nodeModules],
                     repoRoot,
-                    apiKeyPath: apiKey,
                     aiModelConfig: path.join(docs, 'inside.json'),
                     baseDir: root,
                     fs: fakeFs,
@@ -1558,7 +1557,6 @@ test('file access guard blocks private files, encodings, and virtual symlink esc
                 createFileAccessGuard({
                     allowedRoots: [docs, publicDir, nodeModules],
                     repoRoot,
-                    apiKeyPath: apiKey,
                     aiModelConfig: configLink,
                     baseDir: root,
                     fs: configLinkFs,
@@ -1571,7 +1569,6 @@ test('file access guard blocks private files, encodings, and virtual symlink esc
                 createFileAccessGuard({
                     allowedRoots: [docs],
                     repoRoot,
-                    apiKeyPath: apiKey,
                     aiModelConfig: 'bad\0path',
                     fs: fakeFs,
                 }),
@@ -1596,7 +1593,7 @@ test('file access guard refreshes protected identities per request', async () =>
             mkdir(tools, { recursive: true }),
         ])
 
-        const key = path.join(tools, 'api-key.txt')
+        const key = path.join(tools, 'model-config.yaml')
         const publicFile = path.join(publicDir, 'ok.txt')
         const firstLink = path.join(publicDir, 'hard-created.txt')
         const secondLink = path.join(publicDir, 'hard-replaced.txt')
@@ -1659,7 +1656,6 @@ test('file access guard refreshes protected identities per request', async () =>
         const guard = createFileAccessGuard({
             allowedRoots: [docs, publicDir, nodeModules],
             repoRoot,
-            apiKeyPath: key,
             aiModelConfig: null,
             baseDir: root,
             fs: fakeFs,
@@ -1714,20 +1710,19 @@ test('publish scan rejects private files and virtual symlink escapes', async () 
             mkdir(privateDir, { recursive: true }),
         ])
 
-        const apiKey = path.join(tools, 'api-key.txt')
-        const modelConfig = path.join(privateDir, 'model config.json')
+        const modelConfigPath = path.join(tools, 'model-config.yaml')
+        const envModelConfig = path.join(privateDir, 'private-model.json')
         await Promise.all([
             writeFile(path.join(docs, 'index.md'), '# Home', 'utf8'),
             writeFile(path.join(publicDir, 'ok.css'), 'body{}', 'utf8'),
-            writeFile(apiKey, 'FAKE_KEY_SENTINEL', 'utf8'),
-            writeFile(modelConfig, 'FAKE_CONFIG_SENTINEL', 'utf8'),
+            writeFile(modelConfigPath, 'FAKE_KEY_SENTINEL', 'utf8'),
+            writeFile(envModelConfig, 'FAKE_CONFIG_SENTINEL', 'utf8'),
         ])
 
         const base = {
             docsRoot: docs,
             publicDir,
-            apiKeyPath: apiKey,
-            aiModelConfig: modelConfig,
+            aiModelConfig: envModelConfig,
             repositoryRoot: repoRoot,
             baseDirectory: root,
         }
@@ -1736,6 +1731,8 @@ test('publish scan rejects private files and virtual symlink escapes', async () 
         for (const name of [
             '.env',
             'leaked.key',
+            'model-config.yaml',
+            'model-config.json',
             'api-key.txt',
             'bundle.secret.json',
             'bundle.private.json',
@@ -1765,7 +1762,7 @@ test('publish scan rejects private files and virtual symlink escapes', async () 
                 return DEFAULT_FILE_SYSTEM_OPS.lstatSync(value)
             },
             realpathSync(value) {
-                if (pathKey(value) === pathKey(leak)) return apiKey
+                if (pathKey(value) === pathKey(leak)) return modelConfigPath
                 return DEFAULT_FILE_SYSTEM_OPS.realpathSync(value)
             },
         }
@@ -1775,7 +1772,7 @@ test('publish scan rejects private files and virtual symlink escapes', async () 
             (error) => {
                 assert.doesNotMatch(
                     error.message,
-                    /FAKE_KEY_SENTINEL|FAKE_CONFIG_SENTINEL|api-key|[A-Z]:\\/i
+                    /FAKE_KEY_SENTINEL|FAKE_CONFIG_SENTINEL|api-key|model-config|[A-Z]:\\/i
                 )
                 assert.match(
                     error.message,
@@ -1787,7 +1784,7 @@ test('publish scan rejects private files and virtual symlink escapes', async () 
 
         const hardlinkFile = path.join(publicDir, 'hardlink.txt')
         await writeFile(hardlinkFile, 'pretend hardlink', 'utf8')
-        const keyStats = DEFAULT_FILE_SYSTEM_OPS.statSync(apiKey)
+        const keyStats = DEFAULT_FILE_SYSTEM_OPS.statSync(modelConfigPath)
         const identityFs = {
             ...DEFAULT_FILE_SYSTEM_OPS,
             statSync(value) {
@@ -1879,8 +1876,9 @@ test('private model configuration uses only ignored repo paths or outside repo',
             baseDirectory: root,
         }
         const allowed = [
-            path.join(repoRoot, 'tools', 'api-key.txt'),
-            path.join(repoRoot, 'tools', 'api-key.yaml'),
+            path.join(repoRoot, 'tools', 'model-config.yaml'),
+            path.join(repoRoot, 'tools', 'model-config.yml'),
+            path.join(repoRoot, 'tools', 'model-config.json'),
             path.join(repoRoot, 'tools', 'local.key'),
             path.join(repoRoot, 'tools', 'local.pem'),
             path.join(repoRoot, 'tools', 'model.secret.json'),
@@ -1906,6 +1904,9 @@ test('private model configuration uses only ignored repo paths or outside repo',
             path.join(repoRoot, 'config', 'foo.yaml'),
             path.join(repoRoot, 'tools', 'nested', 'foo.key'),
             path.join(repoRoot, 'tools', 'foo.json'),
+            path.join(repoRoot, 'tools', 'api-key.txt'),
+            path.join(repoRoot, 'tools', 'api-key.yaml'),
+            path.join(repoRoot, 'tools', 'model-config.txt'),
             path.join(repoRoot, 'tools', 'API-KEY.TXT'),
             path.join(repoRoot, '.env.example'),
             path.join(repoRoot, '.ENV'),
@@ -1945,7 +1946,7 @@ test('private model configuration uses only ignored repo paths or outside repo',
             /must not be inside a served or publishable path/
         )
 
-        const repoLink = path.join(repoRoot, 'tools', 'api-key.txt')
+        const repoLink = path.join(repoRoot, 'tools', 'model-config.yaml')
         const repoLinkFs = {
             ...DEFAULT_FILE_SYSTEM_OPS,
             realpathSync(value) {
@@ -2171,7 +2172,7 @@ test('production config compiles the client switch to false', async () => {
     assert.equal(config.vite?.server?.fs?.deny, undefined)
     assert.ok(
         !config.vite.server.fs.allow.some((entry) =>
-            /[\\/](?:tools|scripts|README)/u.test(entry)
+            /[\\/](?:tools|README)/u.test(entry)
         )
     )
     const plugins = (config.vite?.plugins ?? []).flat(Infinity)

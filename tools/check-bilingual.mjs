@@ -8,7 +8,7 @@ import {
   getModelInfo,
   requestModel as defaultRequestModel,
   sanitizeModelError
-} from '../tools/ai-model.mjs'
+} from './ai-model.mjs'
 import {
   chineseDirName,
   readmeChinese,
@@ -27,9 +27,9 @@ import { compareProtectedFeatures, projectSemanticText } from './semantic-safe.m
 // content is never executed. Shared-only strings that neither locale overrides
 // are outside the locale config pair check.
 const here = path.dirname(fileURLToPath(import.meta.url))
-export const defaultRootDir = path.resolve(here, '..')
-export const defaultDocsDir = path.join(defaultRootDir, 'docs')
-export const configPairLabel = 'docs/.vitepress/en-us.ts vs docs/.vitepress/zh-cn.ts'
+const defaultRootDir = path.resolve(here, '..')
+const defaultDocsDir = path.join(defaultRootDir, 'docs')
+const configPairLabel = 'docs/.vitepress/en-us.ts vs docs/.vitepress/zh-cn.ts'
 const configLocaleFiles = [
   { file: 'en-us.ts', label: 'docs/.vitepress/en-us.ts' },
   { file: 'zh-cn.ts', label: 'docs/.vitepress/zh-cn.ts' }
@@ -118,7 +118,7 @@ export function getMarkdownParser(docsDir = defaultDocsDir) {
   return parserCache.get(docsDir)
 }
 
-export async function listMarkdownFiles(dir, relative = '') {
+async function listMarkdownFiles(dir, relative = '') {
   const entries = await readdir(dir, { withFileTypes: true })
   const files = []
   const skippedDirs = new Set(['.vitepress', 'node_modules', 'public'])
@@ -137,7 +137,7 @@ export async function listMarkdownFiles(dir, relative = '') {
   return files.sort()
 }
 
-export async function matchPages(docsDir = defaultDocsDir) {
+async function matchPages(docsDir = defaultDocsDir) {
   const errors = []
   const english = (await listMarkdownFiles(docsDir)).filter(
     (file) => file !== chineseDirName && !file.startsWith(`${chineseDirName}/`)
@@ -178,7 +178,7 @@ async function isFile(filePath) {
   }
 }
 
-export async function matchReadmePair(rootDir = defaultRootDir) {
+async function matchReadmePair(rootDir = defaultRootDir) {
   const englishPath = path.join(rootDir, readmeEnglish)
   const chinesePath = path.join(rootDir, readmeChinese)
   const [english, chinese] = await Promise.all([
@@ -212,7 +212,7 @@ export async function matchReadmePair(rootDir = defaultRootDir) {
 // filename: `foo.zh-CN.md` → `foo.md`, and a Chinese-named `说明.md` →
 // `说明.en.md`. English-named pages are never treated as Chinese sources just
 // because their content mentions a Chinese proper noun.
-export async function matchRootDocumentPairs(rootDir = defaultRootDir) {
+async function matchRootDocumentPairs(rootDir = defaultRootDir) {
   const entries = await readdir(rootDir, { withFileTypes: true })
   const errors = []
   const pairs = []
@@ -601,7 +601,7 @@ export function compareUiConfigurations(englishConfig, chineseConfig, options = 
   }
 }
 
-export async function loadSiteConfigs(docsDir = defaultDocsDir) {
+async function loadSiteConfigs(docsDir = defaultDocsDir) {
   const resolved = await resolveConfig(docsDir, 'build', 'production')
   const userConfig = resolved?.userConfig
   const errors = []
@@ -766,7 +766,7 @@ export function compareStructures(englishPath, chinesePath, english, chinese) {
   return errors
 }
 
-export function buildSemanticPrompt({ file, english, chinese }) {
+function buildSemanticPrompt({ file, english, chinese }) {
   if (typeof english !== 'string' || typeof chinese !== 'string') {
     throw new TypeError('Semantic review needs both English and Chinese page text')
   }
@@ -790,6 +790,7 @@ Review all visible text, including:
 - Markdown paragraph and table semantics: content assigned to a paragraph or table must have the same meaning and coverage in both files.
 
 HTML comments are not visible and do not need to match.
+Report only concrete differences in meaning or coverage. Do not report statements that match, equivalent translations or transliterated names as issues. If there are no actual discrepancies, return equivalent=true with an empty issues array.
 
 Protected code, formulas, link destinations, HTML URLs, and bare URLs have been removed locally and are validated by deterministic local comparison. Markers such as [code], [formula], [url], and [link] are placeholders and never need to match. Do not infer or request their contents. Mermaid visible labels are translated copy; compare their meaning. Mermaid syntax is validated locally and is not shown. Do not evaluate visual design differences.
 
@@ -829,7 +830,7 @@ function maskConfigSemanticValue(value) {
   return value
 }
 
-export function buildConfigSemanticPrompt({ english, chinese }) {
+function buildConfigSemanticPrompt({ english, chinese }) {
   if (!isPlainObject(english) || !isPlainObject(chinese)) {
     throw new TypeError('Config semantic review needs English and Chinese UI snapshots')
   }
@@ -959,7 +960,7 @@ export async function runSemanticReview({
   return runModelVerdict(prompt, requestModel, timeoutMs)
 }
 
-export async function runConfigSemanticReview({
+async function runConfigSemanticReview({
   english,
   chinese,
   requestModel = defaultRequestModel,

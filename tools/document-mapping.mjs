@@ -27,10 +27,6 @@ export function rootDocumentTargetName(fileName) {
   return null
 }
 
-export function isRootDocumentTarget(fileName) {
-  return typeof fileName === 'string' && fileName.toLowerCase().endsWith('.en.md')
-}
-
 export function localizeInternalHref(href) {
   if (typeof href !== 'string') return href
   if (href === '/zh-cn') return '/'

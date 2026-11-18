@@ -11,11 +11,11 @@
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs",
-    "check:bilingual": "node scripts/check-bilingual.mjs",
-    "translate:docs": "node scripts/translate-docs.mjs",
-    "translate:docs:write": "node scripts/translate-docs.mjs --write",
-    "translate:docs:force": "node scripts/translate-docs.mjs --write --force",
-    "test:bilingual": "node --test scripts/check-bilingual.test.mjs scripts/document-mapping.test.mjs scripts/markdown-privacy.test.mjs scripts/markdown-protect.test.mjs scripts/markdown-segment.test.mjs scripts/markdown-security.test.mjs scripts/path-safety.test.mjs scripts/mermaid-translate.test.mjs scripts/frontmatter-translate.test.mjs scripts/translate-docs.test.mjs tools/ai-model.test.mjs",
+    "check:bilingual": "node tools/check-bilingual.mjs",
+    "translate:docs": "node tools/translate-docs.mjs",
+    "translate:docs:write": "node tools/translate-docs.mjs --write",
+    "translate:docs:force": "node tools/translate-docs.mjs --write --force",
+    "test:bilingual": "node --test tools/check-bilingual.test.mjs tools/document-mapping.test.mjs tools/markdown-privacy.test.mjs tools/markdown-protect.test.mjs tools/markdown-segment.test.mjs tools/markdown-security.test.mjs tools/path-safety.test.mjs tools/mermaid-translate.test.mjs tools/frontmatter-translate.test.mjs tools/translate-docs.test.mjs tools/ai-model.test.mjs",
     "test:tools": "node --test tools/ai-model.test.mjs tools/ai-search.test.mjs"
   },
   "allowScripts": {

@@ -6,6 +6,7 @@ import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { stringify as stringifyYaml } from 'yaml'
 import {
+  AI_MODEL_CONFIG_PATH,
   DEFAULT_TIMEOUT_MS,
   getModelInfo,
   requestModel,
@@ -63,7 +64,7 @@ async function makeTempDir(t) {
   return dir
 }
 
-async function writeConfig(t, text = makeConfigText(), fileName = 'api-key.yaml') {
+async function writeConfig(t, text = makeConfigText(), fileName = 'model-config.yaml') {
   const dir = await makeTempDir(t)
   const configPath = path.join(dir, fileName)
   await writeFile(configPath, text, 'utf8')
@@ -564,6 +565,22 @@ test('repository config paths are limited to ignored safe locations and never do
     }
   )
 
+  const wrongExtension = path.join(
+    repositoryRoot,
+    'tools',
+    'model-config.txt'
+  )
+  await assert.rejects(
+    getModelInfo({ configPath: wrongExtension }),
+    (error) => {
+      assert.equal(error.code, 'MODEL_CONFIG_ERROR')
+      assert.match(error.message, /仓库外/)
+      assert.ok(!error.message.includes(repositoryRoot))
+      assert.ok(!error.message.includes('model-config.txt'))
+      return true
+    }
+  )
+
   const allowedMissing = path.join(
     repositoryRoot,
     'tools',
@@ -576,6 +593,72 @@ test('repository config paths are limited to ignored safe locations and never do
       assert.match(error.message, /不存在/)
       assert.ok(!error.message.includes(repositoryRoot))
       assert.ok(!error.message.includes(path.basename(allowedMissing)))
+      return true
+    }
+  )
+})
+
+test('defaults to tools/model-config.yaml and never falls back to api-key.txt', async (t) => {
+  assert.equal(
+    AI_MODEL_CONFIG_PATH,
+    path.join(repositoryRoot, 'tools', 'model-config.yaml')
+  )
+  assert.ok(!AI_MODEL_CONFIG_PATH.includes('api-key'))
+  assert.ok(!path.basename(AI_MODEL_CONFIG_PATH).startsWith('api-key.'))
+
+  const legacyPath = path.join(repositoryRoot, 'tools', 'api-key.txt')
+  await assert.rejects(
+    getModelInfo({ configPath: legacyPath }),
+    (error) => {
+      assert.equal(error.code, 'MODEL_CONFIG_ERROR')
+      assert.match(error.message, /仓库外/)
+      assert.ok(!error.message.includes('api-key'))
+      assert.ok(!error.message.includes(repositoryRoot))
+      return true
+    }
+  )
+})
+
+test('AI_MODEL_CONFIG accepts safe YAML or JSON outside the repository', async (t) => {
+  const previous = process.env.AI_MODEL_CONFIG
+  t.after(() => {
+    if (previous === undefined) delete process.env.AI_MODEL_CONFIG
+    else process.env.AI_MODEL_CONFIG = previous
+  })
+
+  const dir = await makeTempDir(t)
+  const yamlPath = path.join(dir, 'private-model.yaml')
+  const jsonPath = path.join(dir, 'private-model.json')
+  await writeFile(yamlPath, makeConfigText(), 'utf8')
+  await writeFile(jsonPath, JSON.stringify({
+    providers: {
+      ustc: {
+        baseUrl: BASE_URL,
+        api: 'openai-completions',
+        apiKey: SECRET,
+        models: [MODEL_A]
+      }
+    }
+  }), 'utf8')
+
+  process.env.AI_MODEL_CONFIG = yamlPath
+  const yamlInfo = await getModelInfo({})
+  assert.equal(yamlInfo.provider, 'ustc')
+  assert.equal(yamlInfo.model.id, 'model-a')
+  assert.ok(!JSON.stringify(yamlInfo).includes(SECRET))
+
+  process.env.AI_MODEL_CONFIG = jsonPath
+  const jsonInfo = await getModelInfo({})
+  assert.equal(jsonInfo.models.length, 1)
+  assert.ok(!JSON.stringify(jsonInfo).includes(SECRET))
+
+  process.env.AI_MODEL_CONFIG = path.join(repositoryRoot, 'tools', 'api-key.txt')
+  await assert.rejects(
+    getModelInfo({}),
+    (error) => {
+      assert.equal(error.code, 'MODEL_CONFIG_ERROR')
+      assert.match(error.message, /仓库外/)
+      assert.ok(!error.message.includes(repositoryRoot))
       return true
     }
   )

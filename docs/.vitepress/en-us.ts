@@ -7,12 +7,12 @@ export const en_us = defineConfig({
         nav: [
             { text: 'About', link: '/About/', activeMatch: '^/About/' },
             { text: 'Projects', link: '/Projects/', activeMatch: '^/Projects/' },
-            { text: 'Blogs and notes', link: '/Blogs/', activeMatch: '^/Blogs/' }
+            { text: 'Notes', link: '/Notes/', activeMatch: '^/Notes/' }
         ],
         sidebar: {
             '/About/': sidebarAbout(),
             '/Projects/': sidebarProjects(),
-            '/Blogs/': sidebarBlogs()
+            '/Notes/': sidebarNotes()
         },
         editLink: {
             pattern: 'https://github.com/yzguo/yzguo.github.io/edit/main/docs/:path',
@@ -38,25 +38,25 @@ function sidebarProjects(): DefaultTheme.SidebarItem[] {
     return [{ text: 'Projects', link: '/Projects/' }]
 }
 
-function sidebarBlogs(): DefaultTheme.SidebarItem[] {
+function sidebarNotes(): DefaultTheme.SidebarItem[] {
     return [{
-        text: 'Blogs and notes',
-        link: '/Blogs/',
+        text: 'Notes',
+        link: '/Notes/',
         items: [
             {
                 text: 'Course notes',
-                link: '/Blogs/Courses/',
-                items: [{ text: 'Course notes demo', link: '/Blogs/Courses/demo' }]
+                link: '/Notes/Courses/',
+                items: [{ text: 'Course notes demo', link: '/Notes/Courses/demo' }]
             },
             {
                 text: 'Learning notes',
-                link: '/Blogs/Learning/',
-                items: [{ text: 'Learning notes demo', link: '/Blogs/Learning/demo' }]
+                link: '/Notes/Learning/',
+                items: [{ text: 'Learning notes demo', link: '/Notes/Learning/demo' }]
             },
             {
                 text: 'Work notes',
-                link: '/Blogs/Work/',
-                items: [{ text: 'Work notes demo', link: '/Blogs/Work/demo' }]
+                link: '/Notes/Work/',
+                items: [{ text: 'Work notes demo', link: '/Notes/Work/demo' }]
             }
         ]
     }]

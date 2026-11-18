@@ -4,7 +4,10 @@ node_modules
 .env.*
 !.env.example
 # Local model credentials and private configuration. These must never be
-# committed, bundled, or copied into build output.
+# committed, bundled, or copied into build output. The default private file is
+# tools/model-config.yaml (YAML or JSON). The legacy api-key names are ignored
+# only so stray copies cannot be committed; the tools never read them.
+/tools/model-config.*
 /tools/api-key.txt
 /tools/api-key.*
 /tools/*.key

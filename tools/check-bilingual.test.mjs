@@ -12,7 +12,6 @@ import {
   parseCheckerArgs,
   parseVerdict
 } from './check-bilingual.mjs'
-import { sanitizeModelError } from '../tools/ai-model.mjs'
 
 const defaultReadme = {
   'README.md': '# Project\n\nEnglish readme.\n',
@@ -204,13 +203,6 @@ test('verdict parsing accepts only a complete structured verdict', () => {
   assert.throws(() => parseVerdict('{"equivalent":true,"issues":["minor"]}'), /also reports issues/)
   assert.throws(() => parseVerdict('{"equivalent":"yes","issues":[]}'), /boolean "equivalent"/)
   assert.throws(() => parseVerdict('{"equivalent":true,"issues":[1]}'), /non-empty strings/)
-})
-
-test('model diagnostics redact URLs and bearer tokens', () => {
-  assert.equal(
-    sanitizeModelError('endpoint https://gateway.example/v1 failed; Bearer abc.def'),
-    'endpoint <url-redacted> failed; Bearer <redacted>'
-  )
 })
 
 test('checker CLI accepts and validates --timeout', () => {
@@ -470,19 +462,19 @@ test('visible config comparison detects missing navigation, sidebar, and labels'
   )
 
   const missingSidebarItem = matchingSiteConfigs()
-  missingSidebarItem.englishConfig.themeConfig.sidebar['/Blogs/'] = [
-    { text: 'Blogs', link: '/Blogs/', items: [{ text: 'First', link: '/Blogs/first' }] },
-    { text: 'More', link: '/Blogs/more' }
+  missingSidebarItem.englishConfig.themeConfig.sidebar['/Notes/'] = [
+    { text: 'Notes', link: '/Notes/', items: [{ text: 'First', link: '/Notes/first' }] },
+    { text: 'More', link: '/Notes/more' }
   ]
-  missingSidebarItem.chineseConfig.themeConfig.sidebar['/Blogs/'] = [
-    { text: '博客', link: '/Blogs/', items: [{ text: '第一篇', link: '/Blogs/first' }] }
+  missingSidebarItem.chineseConfig.themeConfig.sidebar['/Notes/'] = [
+    { text: '笔记', link: '/Notes/', items: [{ text: '第一篇', link: '/Notes/first' }] }
   ]
   assert.match(
     compareUiConfigurations(
       missingSidebarItem.englishConfig,
       missingSidebarItem.chineseConfig
     ).errors.join('\n'),
-    /themeConfig\.sidebar\["\/Blogs"\] item count differs/
+    /themeConfig\.sidebar\["\/Notes"\] item count differs/
   )
 })
 
