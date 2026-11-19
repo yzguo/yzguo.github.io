@@ -7,7 +7,7 @@ A Markdown-first personal website built with VitePress and published on GitHub P
 - English: <https://yzguo.github.io/en/>
 - 简体中文: <https://yzguo.github.io/zh-cn/>
 - 繁體中文: <https://yzguo.github.io/zh-tw/>
-- Language entry: <https://yzguo.github.io/>
+- Language entry (automatic selection): <https://yzguo.github.io/>
 
 ## Site architecture
 
@@ -38,17 +38,17 @@ The site is a static VitePress project. Each language edition lives in its own d
 └─ .github/workflows/static.yml
 ```
 
-`docs/zh-cn/` is the translation source; `docs/en/` and `docs/zh-tw/` hold the English and Traditional Chinese editions at matching relative paths. `docs/index.md` is the language entry and holds no article content. `docs/.vitepress/config.mts` assembles the three locales; `en-us.ts`, `zh-cn.ts`, and `zh-tw.ts` own visible navigation, sidebars, and language-specific UI text; `shared.ts` holds settings shared by all editions and the local-search UI strings for `en`, `zh-cn`, and `zh-tw`.
+`docs/zh-cn/` is the translation source; `docs/en/` and `docs/zh-tw/` hold the English and Traditional Chinese editions at matching relative paths. `docs/index.md` is the root entry that opens the browser-preferred edition and holds no article content. `docs/.vitepress/config.mts` assembles the three locales; `en-us.ts`, `zh-cn.ts`, and `zh-tw.ts` own visible navigation, sidebars, and language-specific UI text; `shared.ts` holds settings shared by all editions and the local-search UI strings for `en`, `zh-cn`, and `zh-tw`.
 
 ## Language routing
 
-The root URL selects an edition from the browser's preferred languages:
+The root URL opens the edition for the browser's preferred language:
 
 - `zh-TW`, `zh-HK`, `zh-MO`, or `zh-Hant` → `/zh-tw/`
 - any other `zh` language → `/zh-cn/`
 - English and every other language → `/en/`
 
-Query strings and fragments are preserved. Automatic selection runs only at the root and is client-side only, with no meta refresh or server redirect. An explicit language path (`/en/`, `/zh-cn/`, `/zh-tw/`) and a manual language switch always take precedence and are never overridden. The root page provides static links to all three editions, including an accessible English entry, so the site remains usable without JavaScript; routing uses no external browser resource.
+Automatic selection is client-side only and runs at the root, with no server redirect. If the browser reports no usable language preference or JavaScript is disabled, the site defaults to English. Visitors do not need to choose a language, and no language-selection page is shown. With JavaScript enabled, query strings and fragments are preserved; the no-JavaScript fallback does not preserve them. An explicit language path (`/en/`, `/zh-cn/`, `/zh-tw/`) and the language menu in the navigation remain available and are never overridden. Routing uses no external browser resource.
 
 ## Content and translation
 
@@ -56,7 +56,7 @@ Simplified Chinese is the translation source: `README.zh-CN.md` is the source fo
 
 ### Path mapping
 
-`/` is the language entry (`docs/index.md`). Each content page exists once per edition, at the same relative path under `docs/en/`, `docs/zh-cn/`, or `docs/zh-tw/`, and its public URL uses the matching prefix.
+`/` is the language entry and opens the edition for the browser's preferred language (`docs/index.md`). Each content page exists once per edition, at the same relative path under `docs/en/`, `docs/zh-cn/`, or `docs/zh-tw/`, and its public URL uses the matching prefix.
 
 | Section | Simplified Chinese (source) | English | Traditional Chinese |
 | --- | --- | --- | --- |
@@ -105,7 +105,7 @@ pnpm test:tools
 - `pnpm translate:docs`: read-only plan of the Simplified Chinese sources and their English and Traditional Chinese targets; writes nothing and calls no model.
 - `pnpm translate:docs:write`: creates missing targets only. English pages are translated by the configured local model; Traditional Chinese pages are converted locally through OpenCC without network access; existing targets are never overwritten. Review every generated file.
 - `pnpm translate:docs:force`: regenerates existing English and Traditional Chinese targets with the same rules and overwrites them.
-- `pnpm check:bilingual`: checks the three document trees, the three root READMEs, other supported root Chinese documents, per-page structure, facts, math, code and link targets, and visible UI text loaded from `en-us.ts`, `zh-cn.ts`, and `zh-tw.ts`. `docs/index.md` is the language entry and is not paired.
+- `pnpm check:bilingual`: checks the three document trees, the three root READMEs, other supported root Chinese documents, per-page structure, facts, math, code and link targets, and visible UI text loaded from `en-us.ts`, `zh-cn.ts`, and `zh-tw.ts`. `docs/index.md` is the root entry and is not paired.
 - `pnpm test:bilingual`: behavior tests for translation, trilingual checks, privacy, paths, and write safety.
 - `pnpm test:tools`: behavior tests for the AI adapter and AI search.
 
@@ -165,7 +165,7 @@ pnpm docs:build
 pnpm docs:preview
 ```
 
-`pnpm docs:dev` serves all three editions, including the root language entry. Markdown supports `$...$` inline math, `$$...$$` block math, and fenced `mermaid` diagrams; the course notes demo contains examples of all three. Fonts, formulas, and diagrams render locally and are not loaded from a CDN.
+`pnpm docs:dev` serves all three editions, including the root entry. Markdown supports `$...$` inline math, `$$...$$` block math, and fenced `mermaid` diagrams; the course notes demo contains examples of all three. Fonts, formulas, and diagrams render locally and are not loaded from a CDN.
 
 ### Network requirements and offline limits
 
@@ -174,6 +174,8 @@ Every browser runtime asset is served from this site's own origin, with no CDN o
 - Loading the deployed site requires a connection to its hosting server; `pnpm docs:dev` and `pnpm docs:preview` require a local server.
 - The first `pnpm install` needs access to a package registry, and reinstalling without a populated store also needs the network.
 - If the configured model provider is a remote API, AI search, English translation, and model-backed checks need network access to that API. The adapter runs locally, but that does not make the model offline.
+
+Network transfer time depends on the visitor's connection and the hosting service; the site does not guarantee any page load time or per-resource latency.
 
 Do not describe the site or its AI features as fully offline, and do not add external runtime resources as a workaround for network restrictions.
 
@@ -196,7 +198,7 @@ The main check commands are:
 
 `pnpm check:bilingual` sends paired page content and UI text to the configured model; review its findings and do not treat them as proof of translation quality. GitHub Actions has no model credentials, so this check runs locally or during main verification only and is not part of the deployment workflow.
 
-Manual acceptance covers at least: the three editions' home pages, navigation, sidebars, and Notes entries; root selection for Traditional Chinese, other Chinese, and English or other languages; explicit language paths and manual switches remaining in effect; the English entry working without JavaScript; desktop and mobile widths; light and dark themes; math and Mermaid; font loading; and a production build with no AI and no non-site runtime requests.
+Manual acceptance covers at least: the three editions' home pages, navigation, sidebars, and Notes entries; automatic root selection for Traditional Chinese, other Chinese, and English or other languages; English as the root fallback when JavaScript is disabled or no language is reported; explicit language paths and the navigation language menu remaining in effect; desktop and mobile widths; light and dark themes; math and Mermaid; font loading; and a production build with no AI and no non-site runtime requests.
 
 - Report only commands actually run, their real output, and their coverage; never claim an unrun check passed.
 - Never fabricate content, data, screenshots, or test results, and never hide failures, warnings, or known limitations.
@@ -208,7 +210,7 @@ Manual acceptance covers at least: the three editions' home pages, navigation, s
 Public repositories must contain no credentials, private configuration, drafts, or unpublished personal data.
 
 - `tools/model-config.yaml` must stay ignored and local-only. Only the local model adapter reads it at runtime for authentication; humans and agents must never read, print, copy, or commit it.
-- `<!-- private:start -->` and `<!-- private:end -->` control model input only and do not change publishability; text inside them can still be exposed through Git or VitePress.
+- Private block markers `<!-- private:start -->` and `<!-- private:end -->` control model input only and do not change publishability; text inside them can still be exposed through Git or VitePress.
 - HTML comments and private blocks are stripped from model input; do not use them to store keys, and never put keys in any Markdown.
 - `ai-search.config.json` must contain only the public boolean switch; never add endpoints, keys, or other sensitive configuration.
 - The translator validates results and checks conflicts before writing a batch; conflict checks are not a backup. Avoid editing target files concurrently; `translate:docs:force` overwrites existing English and Traditional Chinese pages.

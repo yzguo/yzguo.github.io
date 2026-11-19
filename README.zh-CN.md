@@ -7,7 +7,7 @@
 - English: <https://yzguo.github.io/en/>
 - 简体中文: <https://yzguo.github.io/zh-cn/>
 - 繁體中文: <https://yzguo.github.io/zh-tw/>
-- 语言入口: <https://yzguo.github.io/>
+- 语言入口（自动选择）: <https://yzguo.github.io/>
 
 ## 站点架构
 
@@ -38,17 +38,17 @@
 └─ .github/workflows/static.yml
 ```
 
-`docs/zh-cn/` 是翻译源；`docs/en/` 与 `docs/zh-tw/` 在相同相对路径存放英语和繁体中文版本。`docs/index.md` 是语言入口，不包含正文。`docs/.vitepress/config.mts` 组装三个语言版本；`en-us.ts`、`zh-cn.ts`、`zh-tw.ts` 分别维护可见导航、侧栏和对应语言的界面文案；`shared.ts` 保存三个版本共享的设置，以及 `en`、`zh-cn`、`zh-tw` 三语的本地搜索界面文案。
+`docs/zh-cn/` 是翻译源；`docs/en/` 与 `docs/zh-tw/` 在相同相对路径存放英语和繁体中文版本。`docs/index.md` 是根入口，按浏览器首选语言打开对应版本，不包含正文。`docs/.vitepress/config.mts` 组装三个语言版本；`en-us.ts`、`zh-cn.ts`、`zh-tw.ts` 分别维护可见导航、侧栏和对应语言的界面文案；`shared.ts` 保存三个版本共享的设置，以及 `en`、`zh-cn`、`zh-tw` 三语的本地搜索界面文案。
 
 ## 语言路由
 
-根 URL 根据浏览器首选语言选择版本：
+根 URL 自动按浏览器首选语言打开对应版本：
 
 - `zh-TW`、`zh-HK`、`zh-MO` 或 `zh-Hant` → `/zh-tw/`
 - 其他 `zh` 语言 → `/zh-cn/`
 - 英语及所有其他语言 → `/en/`
 
-查询字符串和片段会保留。自动选择只在根路径执行，且仅在客户端进行，不使用 meta refresh 或服务器重定向。明确的语言路径（`/en/`、`/zh-cn/`、`/zh-tw/`）和手动切换始终优先，不会被覆盖。根页面提供指向三个版本的静态链接，其中包含无需 JavaScript 即可访问的英文入口，因此禁用 JavaScript 时站点仍可使用；路由不依赖外部浏览器资源。
+自动选择只在根路径执行，且仅在客户端进行，不使用服务器重定向。浏览器没有可用的语言偏好或禁用 JavaScript 时，站点默认进入英文版。访客无需选择语言，也不会看到语言选择页。启用 JavaScript 时会保留查询字符串和片段；无 JavaScript 的回退不会保留。明确的语言路径（`/en/`、`/zh-cn/`、`/zh-tw/`）和导航菜单中的语言切换保持可用，且不会被覆盖。路由不依赖外部浏览器资源。
 
 ## 内容与翻译
 
@@ -56,7 +56,7 @@
 
 ### 路径映射
 
-`/` 是语言入口（`docs/index.md`）。每个内容页在三个版本的 `docs/en/`、`docs/zh-cn/` 或 `docs/zh-tw/` 下各有一份相同相对路径的文件，公开 URL 使用对应前缀。
+`/` 是语言入口，自动进入浏览器首选语言对应的版本（`docs/index.md`）。每个内容页在三个版本的 `docs/en/`、`docs/zh-cn/` 或 `docs/zh-tw/` 下各有一份相同相对路径的文件，公开 URL 使用对应前缀。
 
 | 栏目 | 简体中文（源） | 英语 | 繁体中文 |
 | --- | --- | --- | --- |
@@ -105,7 +105,7 @@ pnpm test:tools
 - `pnpm translate:docs`：只读列出简体中文源及其英语、繁体中文目标；不写文件，也不调用模型。
 - `pnpm translate:docs:write`：只创建缺失目标。英语页面由配置的本机模型翻译；繁体中文页面由本机 OpenCC 离线转换；已有目标不会被覆盖。审阅每个生成文件。
 - `pnpm translate:docs:force`：按相同规则重新生成已有英语和繁体中文目标并覆盖它们。
-- `pnpm check:bilingual`：检查三个文档目录、根目录三份 README、其他受支持的根目录中文文档、逐页结构、事实、数学、代码和链接目标，以及从 `en-us.ts`、`zh-cn.ts`、`zh-tw.ts` 加载的可见界面文案。`docs/index.md` 是语言入口，不参与配对。
+- `pnpm check:bilingual`：检查三个文档目录、根目录三份 README、其他受支持的根目录中文文档、逐页结构、事实、数学、代码和链接目标，以及从 `en-us.ts`、`zh-cn.ts`、`zh-tw.ts` 加载的可见界面文案。`docs/index.md` 是根入口，不参与配对。
 - `pnpm test:bilingual`：翻译、三语检查、隐私、路径和写入安全的行为测试。
 - `pnpm test:tools`：AI 适配器与 AI 搜索的行为测试。
 
@@ -126,7 +126,7 @@ AI 搜索是可选的本机开发功能，不进入静态生产站点。唯一�
 }
 ```
 
-默认 `false`。要使用它，将 `enabled` 改为 `true` 并重启 `pnpm docs:dev`。问题和选中的公开页面摘录会发送给配置的模型服务；私有块、HTML 注释、草稿和非公开页面不会进入模型输入。接口只接受回环地址和同源 `Host`/`Origin` 的客户端；界面提供取消按钮，错误和超时会明确显示。
+默认 `false`。要使用它，将 `enabled` 改为 `true` 并重启 `pnpm docs:dev`。问题和选中的公开页面摘录会发送给配置的模型服务；私有块、HTML 注释、草稿和非公开页面不会进入模型输入。接口只接受来自回环地址且 `Host`/`Origin` 与本站同源匹配的客户端；界面提供取消按钮，错误和超时会明确显示。
 
 适配器直接调用 OpenAI 兼容的模型 API。无论文件内容如何，`pnpm docs:build` 都把开关解析为 `false`，因此生产包不含 AI 按钮、endpoint、适配器、配置对象或凭据。GitHub Pages 是纯静态托管；公开可用的 AI 必须另建有服务端凭据保护的后端。开发服务器只提供 `docs/`、`docs/public/` 和 `node_modules/`，构建会拒绝可发布路径中的私有文件或符号链接/junction。这些是纵深防御，不构成对已失陷本地账户或文件系统的绝对保证。
 
@@ -165,7 +165,7 @@ pnpm docs:build
 pnpm docs:preview
 ```
 
-`pnpm docs:dev` 提供三个版本，包括根语言入口。Markdown 支持 `$...$` 行内公式、`$$...$$` 块级公式和围栏 `mermaid` 图表；课程笔记演示页包含这三类示例。字体、公式和图表都在本机渲染，不从 CDN 加载。
+`pnpm docs:dev` 提供三个版本，包括根入口。Markdown 支持 `$...$` 行内公式、`$$...$$` 块级公式和围栏 `mermaid` 图表；课程笔记演示页包含这三类示例。字体、公式和图表都在本机渲染，不从 CDN 加载。
 
 ### 网络需求与离线边界
 
@@ -174,6 +174,8 @@ pnpm docs:preview
 - 访问已部署的站点需要连接其托管服务器；`pnpm docs:dev` 和 `pnpm docs:preview` 需要本地服务器。
 - 首次 `pnpm install` 需要访问包仓库；在本地缓存不完整时重新安装也需要网络。
 - 如果配置的是远端模型 API，AI 搜索、英语翻译和依赖模型的检查需要连通该 API。适配器在本机运行，但这不代表模型可以离线使用。
+
+网络传输时间取决于访问者的网络和托管服务；站点不保证任何加载耗时或单项资源时延。
 
 不得把站点或其 AI 功能描述为完全离线，也不得为了绕过网络限制而引入外部运行时资源。
 
@@ -196,7 +198,7 @@ pnpm docs:preview
 
 `pnpm check:bilingual` 会把配对页面内容和界面文案发送给配置的模型，应人工审阅其结论，不能当作翻译质量的证明。GitHub Actions 没有模型凭据，因此该检查只在本地或主验证阶段运行，不包含在部署 workflow 中。
 
-人工验收至少覆盖：三个版本的首页、导航、侧栏和笔记条目；根路径针对繁体中文、其他中文、英语及其他语言的选择；明确语言路径和手动切换保持生效；无 JavaScript 时英文入口可用；桌面与手机宽度；浅色和深色主题；数学公式与 Mermaid；字体加载；以及无 AI、无本站以外运行时请求的生产构建。
+人工验收至少覆盖：三个版本的首页、导航、侧栏和笔记条目；根路径针对繁体中文、其他中文、英语及其他语言的自动选择；禁用 JavaScript 或浏览器未提供语言时根路径回退到英文；明确语言路径和导航菜单中的语言切换保持生效；桌面与手机宽度；浅色和深色主题；数学公式与 Mermaid；字体加载；以及无 AI、无本站以外运行时请求的生产构建。
 
 - 只报告实际运行过的命令、真实输出和覆盖范围；未运行的检查不得声称通过。
 - 不得伪造内容、数据、截图或测试结果，也不得隐藏失败、警告或已知限制。
@@ -208,7 +210,7 @@ pnpm docs:preview
 公开仓库中不得出现凭据、私有配置、草稿或未公开的个人数据。
 
 - `tools/model-config.yaml` 必须保持被忽略、仅本机存在；仅本机模型适配器在运行时为认证读取，人和 agent 不得读取、打印、复制或提交它。
-- `<!-- private:start -->` 与 `<!-- private:end -->` 只控制模型输入，不改变文件的可发布性；标记内的文字仍可能通过 Git 或 VitePress 公开。
+- 私有块标记 `<!-- private:start -->` 与 `<!-- private:end -->` 只控制模型输入，不改变文件的可发布性；标记内的文字仍可能通过 Git 或 VitePress 公开。
 - HTML 注释和私有块会从模型输入中移除；不要用它们存放密钥，也不要把密钥放进任何 Markdown。
 - `ai-search.config.json` 只能包含公开布尔开关，不得写入 endpoint、密钥或其他敏感配置。
 - 翻译工具在写入整批文件前验证结果并检查冲突；冲突检查不能代替备份。避免同时编辑目标文件，`translate:docs:force` 会覆盖已有英语和繁体中文页面。
@@ -225,7 +227,7 @@ pnpm docs:preview
 - 结构和命令变化时同步更新三份 README；本 README 是唯一开发入口，不要创建平行的开发说明。
 - 报告阻塞、风险或需要决策的事项；不要用进度汇报代替实际完成。
 
-## 发布
+## 部署
 
 推送到 `main` 会触发 `.github/workflows/static.yml`，安装依赖、构建站点并把 `docs/.vitepress/dist` 部署到 GitHub Pages。仓库 Pages 的发布来源必须设为 **GitHub Actions**。
 

@@ -37,6 +37,21 @@ test('collects Markdown, reference, HTML, and frontmatter destinations', () => {
     ]
   )
 })
+test('validates each responsive image destination separately', () => {
+  const text = [
+    '---',
+    'image:',
+    '  srcset: /images/small.webp 320w, /images/large.webp 640w',
+    '---',
+    '<img srcset="/images/small.webp 1x, /zh-cn/Notes/ 2x">'
+  ].join('\n')
+  assert.deepEqual(collectLocaleLinkTargets(text), [
+    '/images/small.webp', '/images/large.webp', '/images/small.webp', '/zh-cn/Notes/'
+  ])
+  assert.match(localeLinkIssues(text, 'en')[0], /语言前缀与 \/en\/ 不一致/)
+  assert.deepEqual(localeLinkIssues(text, 'zh-cn'), [])
+})
+
 
 test('links inside code and formulas are not navigation', () => {
   const text = [

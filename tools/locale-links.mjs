@@ -23,13 +23,33 @@ function destinationsFromWholeLink(value) {
   if (index === -1) return []
   return [destinationFromParentheses(text.slice(index + 1))]
 }
+function destinationsFromSrcset(value) {
+  const text = String(value)
+  const destinations = []
+  let index = 0
+  while (index < text.length) {
+    while (index < text.length && /[\s,]/.test(text[index])) index += 1
+    const start = index
+    while (index < text.length && !/\s/.test(text[index])) index += 1
+    const raw = text.slice(start, index)
+    const target = raw.replace(/,+$/, '')
+    if (target) destinations.push(target)
+    if (target.length !== raw.length) continue
+    while (index < text.length && text[index] !== ',') index += 1
+    if (index < text.length) index += 1
+  }
+  return destinations
+}
+
 
 function destinationsFromHtml(tag) {
   const destinations = []
-  const attributes = /\b(?:href|src|action|formaction)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi
+  const attributes = /\b(href|src|srcset|action|formaction)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi
   let match
   while ((match = attributes.exec(tag)) !== null) {
-    destinations.push(match[1] ?? match[2] ?? match[3] ?? '')
+    const value = match[2] ?? match[3] ?? match[4] ?? ''
+    if (match[1].toLowerCase() === 'srcset') destinations.push(...destinationsFromSrcset(value))
+    else destinations.push(value)
   }
   const css = /url\(\s*(['"]?)([^)'"]+)\1\s*\)/gi
   while ((match = css.exec(tag)) !== null) destinations.push(match[2])
@@ -42,8 +62,11 @@ function frontmatterDestinations(frontmatter) {
   const { records } = parseFrontmatterScalars(frontmatter)
   for (const record of records) {
     if (record.error || typeof record.value !== 'string') continue
-    if (!pathLikeValue.test(record.value)) continue
-    destinations.push(record.value)
+    if (record.key?.toLowerCase() === 'srcset') {
+      destinations.push(...destinationsFromSrcset(record.value))
+    } else if (pathLikeValue.test(record.value)) {
+      destinations.push(record.value)
+    }
   }
   return destinations
 }

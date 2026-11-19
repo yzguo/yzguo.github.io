@@ -985,9 +985,9 @@ Compare every visible string, including title, description, navigation labels, s
 
 Requirements:
 - Every visible string present in one locale must have a corresponding string in the other with the same meaning and coverage.
-- Flag values that are null on one side, added on one side, or changed in meaning, names, numbers, dates, labels, or wording.
+- Flag values that are null on one side, added on one side, or changed in meaning, names, numbers, dates, or labels.
 - Flag source-language UI copy left untranslated in the target locale, except proper nouns, product names, acronyms, symbols, and language names.
-- Simplified/Traditional script differences and equivalent regional wording are not mismatches. Do not flag different but equivalent phrasing, such as "offline" versus "without network access".
+- Simplified/Traditional script differences, locale-specific punctuation, and equivalent regional wording are not mismatches. Do not flag different but equivalent phrasing, such as "offline" versus "without network access".
 - A null on both sides means an unused optional field and is not a mismatch.
 - [url] is an opaque placeholder for an already checked link target: never infer its content or count from it.
 - Ignore non-visible configuration, link targets, and visual design differences.

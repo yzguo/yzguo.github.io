@@ -5,7 +5,11 @@ hero:
   text: "Personal website"
   tagline: "Ramblings, meow."
   image:
-    src: /images/pic.png
+    src: /images/pic-320.webp
+    srcset: "/images/pic-320.webp 320w, /images/pic-640.webp 640w"
+    sizes: "(min-width: 60rem) 320px, (min-width: 40rem) 256px, 192px"
+    width: 320
+    height: 320
     alt: Yanzhen Guo's profile photo
   actions:
     - theme: brand

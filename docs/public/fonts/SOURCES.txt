@@ -12,25 +12,21 @@ Latin Modern Mono 10 (regular, italic)
   Upstream: https://www.gust.org.pl/projects/e-foundry/latin-modern/
   Source files: https://mirrors.ctan.org/fonts/lm/fonts/opentype/public/lm/
   Modification: converted from OpenType (CFF) to WOFF2; outlines unchanged.
-  Scope: code and preformatted text only. The Latin Modern Roman faces were
-  removed when body text switched to the local Noto Sans SC faces, so those
-  WOFF2 files and @font-face rules no longer exist.
+  Scope: code and preformatted text.
 
 Noto Sans SC
   Version: Google Fonts v41 variable font (weights 100-900)
   License: SIL Open Font License 1.1 (see noto-sans-sc/OFL.txt)
   Upstream: https://fonts.google.com/noto/specimen/Noto+Sans+SC
-  Files: 4 merged tier WOFF2 files plus 98 fallback WOFF2 unicode-range slices.
-  Tiering: tier1 contains every character used by the current site, the 1,000
-  most frequent modern Chinese characters, and CJK punctuation/fullwidth forms;
-  tier2 holds frequency ranks 1,001-3,500; tier3 holds ranks 3,501-7,000; the
-  symbols tier holds the GB2312 symbol rows (Greek, Cyrillic, kana, punctuation,
-  etc.). Character ranks come from the Jun Da Modern Chinese Character Frequency
-  List as distributed by hanziDB.csv (MIT).
-  Fallback: all 100 original Google Fonts unicode-range slices are retained in
-  the build except slices 089/095, whose entire ranges are covered by the tiers.
-  Their ranges are narrowed to remove tier characters, so a tier character never
-  triggers a fallback download. No previously supported character was dropped.
+  Files: 46 fine-grained CJK/symbol slices, 39 site-character slices from
+  fallback fonts, and 98 fallback WOFF2 slices.
+  CJK slices contain the site's interface characters, other site characters,
+  and additional supported characters in separate unicode ranges. Symbol
+  slices cover Greek, Cyrillic, kana, punctuation and related characters.
+  The fallback slices cover the remaining supported glyphs. Each slice is
+  restricted to its declared unicode range; the variable weight axis is kept.
+  Character ranks use the Jun Da Modern Chinese Character Frequency List,
+  as distributed by hanziDB.csv (MIT).
   Modification: two CSS families are built from these same local slices.
   'Noto Sans SC Latin' is first in the site stack and declares the real Latin
   text ranges present in slices 101 (Basic Latin, Latin-1, punctuation), 100

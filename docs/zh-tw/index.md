@@ -5,7 +5,11 @@ hero:
   text: "個人網站"
   tagline: "碎碎念喵"
   image:
-    src: /images/pic.png
+    src: /images/pic-320.webp
+    srcset: "/images/pic-320.webp 320w, /images/pic-640.webp 640w"
+    sizes: "(min-width: 60rem) 320px, (min-width: 40rem) 256px, 192px"
+    width: 320
+    height: 320
     alt: 郭彥禛的頭像
   actions:
     - theme: brand
