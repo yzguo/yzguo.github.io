@@ -1,6 +1,5 @@
-import { canonicalInternalHref } from './document-mapping.mjs'
-import { maskMarkdown } from './markdown-protect.mjs'
-import { splitMarkdownDocument } from './markdown-privacy.mjs'
+import { canonicalInternalHref } from './document-model.mjs'
+import { maskMarkdown, splitMarkdownDocument } from './markdown-safety.mjs'
 import { getMermaidSemanticData } from './mermaid-translate.mjs'
 
 // Converts untrusted Markdown into a model-safe semantic projection. Code,
@@ -396,8 +395,10 @@ function sameArray(left, right) {
   return JSON.stringify(left) === JSON.stringify(right)
 }
 
-export function compareProtectedFeatures(english, chinese) {
+export function compareProtectedFeatures(leftFeatures, rightFeatures, options = {}) {
   const errors = []
+  const leftLabel = options.leftLabel ?? '左侧'
+  const rightLabel = options.rightLabel ?? '右侧'
   const keys = [
     ['code', '代码内容'],
     ['math', '公式内容'],
@@ -405,11 +406,19 @@ export function compareProtectedFeatures(english, chinese) {
     ['mermaid', 'Mermaid 结构']
   ]
   for (const [key, label] of keys) {
-    const left = [...(english?.[key] ?? [])].sort()
-    const right = [...(chinese?.[key] ?? [])].sort()
-    if (!sameArray(left, right)) {
-      errors.push(`本地受保护${label}不一致，无法交给模型比较`)
-    }
+    const left = [...(leftFeatures?.[key] ?? [])].sort()
+    const right = [...(rightFeatures?.[key] ?? [])].sort()
+    if (sameArray(left, right)) continue
+
+    const extraOnLeft = left.filter((value) => !right.includes(value)).length
+    const extraOnRight = right.filter((value) => !left.includes(value)).length
+    const details = []
+    if (extraOnLeft > 0) details.push(`${leftLabel} 多出 ${extraOnLeft} 项`)
+    if (extraOnRight > 0) details.push(`${rightLabel} 多出 ${extraOnRight} 项`)
+    errors.push(
+      `本地受保护${label}不一致（${leftLabel}: ${left.length} 项；` +
+      `${rightLabel}: ${right.length} 项${details.length > 0 ? `；${details.join('；')}` : ''}）`
+    )
   }
   return errors
 }

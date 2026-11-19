@@ -3,12 +3,12 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
-import { getMarkdownParser } from './check-bilingual.mjs'
-import { convertFrontmatter } from './frontmatter-translate.mjs'
+import { getMarkdownParser } from './markdown-safety.mjs'
 import { convertMermaidSource } from './mermaid-translate.mjs'
 import {
   assertTraditionalText,
   convertBodyToTraditional,
+  convertFrontmatter,
   convertMarkdownToTraditional,
   convertTextToTraditional,
   findSimplifiedText,

@@ -1,8 +1,8 @@
 /*
  * Latin Modern Mono (GUST Font License 1.0), self-hosted.
- * Only the code/preformatted-text faces are kept. Body text now uses the
- * self-hosted Noto Sans SC slices in ./noto-sans-sc.css, so the Latin Modern
- * Roman files and @font-face rules were removed.
+ * Only the code/preformatted-text faces are kept. Body text uses the
+ * self-hosted consolidated Noto Sans SC faces in ./noto-sans-sc.css, so the
+ * Latin Modern Roman files and @font-face rules were removed.
  *
  * The file name is retained because the theme entry imports it. Mono 10
  * regular/italic were converted from the upstream OpenType files to WOFF2

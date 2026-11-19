@@ -1,13 +1,16 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { link, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
-import { getMarkdownParser } from './check-bilingual.mjs'
+import { getMarkdownParser, maskMarkdown } from './markdown-safety.mjs'
+import { parseFrontmatterScalars } from './document-model.mjs'
 import { findSimplifiedText } from './traditional-chinese.mjs'
 import {
   collectTranslationSources,
   main,
+  segmentMarkdown,
+  translateFrontmatter,
   translateSource,
   translateTraditionalSource,
   writeTranslationsAtomically
@@ -877,4 +880,318 @@ test('new targets are created exclusively, never replacing a racing file', async
   assert.equal(await readFile(target, 'utf8'), 'racing user file\n')
   const leftovers = (await readdir(path.dirname(target))).filter((name) => name.startsWith('.omp-translate-'))
   assert.deepEqual(leftovers, [])
+})
+
+// Frontmatter value translation shares the merged translation pipeline.
+
+function frontmatter(lines) {
+  return `${lines.join('\n')}\n`
+}
+
+test('frontmatter translation changes values but not keys, links, or structure', async () => {
+  const source = frontmatter([
+    'layout: home',
+    'hero:',
+    '  name: "郭彦禛"',
+    '  text: 个人网站',
+    '  tagline: \'碎碎念喵\'',
+    '  image:',
+    '    src: /images/pic.png',
+    '    alt: 郭彦禛的头像',
+    '  actions:',
+    '    - theme: brand',
+    '      text: 笔记',
+    '      link: /zh-cn/Notes/',
+    'features:',
+    '  - title: 关于',
+    '    details: 学习经历、兴趣与联系方式。',
+    '    link: /zh-cn/About/',
+    '    linkText: 了解我'
+  ])
+
+  const calls = []
+  const requestModel = async ({ prompt }) => {
+    calls.push(prompt)
+    const values = JSON.parse(prompt.match(/<<<FRONTMATTER VALUES [^>]+>>>\n([\s\S]*?)\n<<<END/)[1])
+    return JSON.stringify(values.map((value) => {
+      if (value === '郭彦禛') return 'Yanzhen Guo'
+      if (value === '个人网站') return 'Personal website'
+      if (value === '碎碎念喵') return 'Ramblings, meow.'
+      if (value === '郭彦禛的头像') return "Yanzhen Guo's profile photo"
+      if (value === '笔记') return 'Notes'
+      if (value === '关于') return 'About'
+      if (value === '学习经历、兴趣与联系方式。') return 'Education, interests, and contact details.'
+      if (value === '了解我') return 'About me'
+      return 'Translated'
+    }))
+  }
+
+  const translated = await translateFrontmatter(source, {
+    requestModel,
+    sourcePath: 'docs/zh-cn/index.md'
+  })
+
+  assert.equal(calls.length, 1)
+  assert.match(translated, /layout: home/)
+  assert.match(translated, /name: "Yanzhen Guo"/)
+  assert.match(translated, /text: Personal website/)
+  assert.match(translated, /tagline: 'Ramblings, meow\.'/)
+  assert.match(translated, /src: \/images\/pic\.png/)
+  assert.match(translated, /alt: Yanzhen Guo's profile photo/)
+  assert.match(translated, /link: \/en\/Notes\//)
+  assert.match(translated, /link: \/en\/About\//)
+  assert.match(translated, /- title: About/)
+  assert.doesNotMatch(translated, /郭彦禛|关于|了解我/)
+})
+
+test('frontmatter without Chinese text does not call the model but localizes links', async () => {
+  const source = frontmatter([
+    'hero:',
+    '  image:',
+    '    src: /images/pic.png',
+    '  actions:',
+    '    - text: English already',
+    '      link: /zh-cn/Notes/'
+  ])
+  const requestModel = async () => {
+    throw new Error('model must not be called')
+  }
+  const translated = await translateFrontmatter(source, { requestModel, sourcePath: 'x' })
+  assert.match(translated, /text: English already/)
+  assert.match(translated, /link: \/en\/Notes\//)
+})
+
+test('unsupported YAML constructs with Chinese fail instead of corrupting the file', async () => {
+  const block = frontmatter(['description: |', '  第一行', '  第二行'])
+  await assert.rejects(
+    translateFrontmatter(block, { requestModel: async () => '[]', sourcePath: 'x' }),
+    /块字符串含中文/
+  )
+
+  const flow = frontmatter(['tags: [中文, 英文]'])
+  await assert.rejects(
+    translateFrontmatter(flow, { requestModel: async () => '[]', sourcePath: 'x' }),
+    /流式集合含中文/
+  )
+
+  const multiline = frontmatter(['title: "第一行', '  第二行"'])
+  await assert.rejects(
+    translateFrontmatter(multiline, { requestModel: async () => '[]', sourcePath: 'x' }),
+    /双引号|YAML/
+  )
+})
+
+test('malformed model output is rejected before any value is written', async () => {
+  const source = frontmatter(['title: 标题', 'subtitle: 副标题'])
+  await assert.rejects(
+    translateFrontmatter(source, {
+      requestModel: async () => JSON.stringify(['Only one']),
+      sourcePath: 'x'
+    }),
+    /期望 2 条/
+  )
+  await assert.rejects(
+    translateFrontmatter(source, {
+      requestModel: async () => JSON.stringify(['One', 'Two', 'Three']),
+      sourcePath: 'x'
+    }),
+    /期望 2 条/
+  )
+  await assert.rejects(
+    translateFrontmatter(source, {
+      requestModel: async () => 'not json',
+      sourcePath: 'x'
+    }),
+    /不是有效 JSON/
+  )
+  await assert.rejects(
+    translateFrontmatter(source, {
+      requestModel: async () => JSON.stringify(['Line\nbreak', 'Two']),
+      sourcePath: 'x'
+    }),
+    /包含换行/
+  )
+  await assert.rejects(
+    translateFrontmatter(source, {
+      requestModel: async () => JSON.stringify(['<!-- hidden -->', 'Two']),
+      sourcePath: 'x'
+    }),
+    /私有内容标记/
+  )
+})
+
+test('Chinese paths in frontmatter are rejected instead of corrupted', async () => {
+  await assert.rejects(
+    translateFrontmatter(frontmatter(['link: /zh-cn/中文页面/']), {
+      requestModel: async () => JSON.stringify(['/Chinese page/']),
+      sourcePath: 'x'
+    }),
+    /路径或 URL 含中文/
+  )
+})
+
+test('scalar parser exposes only translatable values and records line numbers', () => {
+  const parsed = parseFrontmatterScalars(frontmatter([
+    'title: 标题',
+    'items:',
+    '  - 第一项',
+    '  - theme: brand',
+    '    text: 第二项'
+  ]))
+  assert.deepEqual(
+    parsed.records.filter((record) => !record.error).map((record) => [record.line + 1, record.value]),
+    [[1, '标题'], [3, '第一项'], [4, 'brand'], [5, '第二项']]
+  )
+})
+
+// Markdown segmentation shares the merged translation pipeline.
+
+function complexBody() {
+  const rows = []
+  for (let index = 0; index < 18; index += 1) {
+    rows.push(`| [链接${index}](/zh-cn/A/${index}) | \`代码${index}\` | 中文说明 ${index} |`)
+  }
+  return [
+    '# 标题',
+    '',
+    '第一段包含 [链接](/zh-cn/Notes/) 和 `行内代码`，另有 $x+y$。',
+    '',
+    '| 名称 | 代码 | 说明 |',
+    '| --- | --- | --- |',
+    ...rows,
+    '',
+    '```python',
+    '# 代码中的中文不受影响',
+    'print("保留")',
+    '```',
+    '',
+    '结尾段落。',
+    ''
+  ].join('\n')
+}
+
+test('segmentation preserves the source exactly', () => {
+  const body = complexBody()
+  const parts = segmentMarkdown(body, { maxChars: 800, maxTokens: 12 })
+  assert.equal(parts.map((part) => part.text).join(''), body)
+  assert.ok(parts.some((part) => part.kind === 'fence' && !part.translatable))
+  assert.ok(parts.some((part) => part.kind === 'blank' && !part.translatable))
+  assert.ok(parts.filter((part) => part.translatable).length > 1)
+})
+
+test('no translatable segment exceeds configured token or character budgets', () => {
+  const body = complexBody()
+  const parts = segmentMarkdown(body, { maxChars: 800, maxTokens: 12 })
+  for (const part of parts.filter((entry) => entry.translatable)) {
+    const tokens = maskMarkdown(part.text, { protectPipes: true }).tokens.length
+    assert.ok(tokens <= 12, `segment has ${tokens} protected tokens`)
+    assert.ok(part.text.length <= 800, `segment has ${part.text.length} characters`)
+  }
+})
+
+test('a long table is split without changing table syntax', () => {
+  const body = complexBody()
+  const parts = segmentMarkdown(body, { maxChars: 600, maxTokens: 10 })
+  const translatable = parts.filter((part) => part.translatable).map((part) => part.text).join('')
+  assert.match(translatable, /\| 名称 \| 代码 \| 说明 \|/)
+  assert.match(translatable, /\| \[链接17\]\(\/zh-cn\/A\/17\) \| `代码17` \| 中文说明 17 \|/)
+})
+
+test('fenced code is never made translatable even when it contains blank lines', () => {
+  const body = [
+    '前文。',
+    '',
+    '```mermaid',
+    'flowchart TD',
+    '',
+    '  A[中文] --> B[结束]',
+    '```',
+    '',
+    '后文。'
+  ].join('\n')
+  const parts = segmentMarkdown(body)
+  const fence = parts.find((part) => part.kind === 'fence')
+  assert.ok(fence)
+  assert.equal(fence.translatable, false)
+  assert.match(fence.text, /A\[中文\] --> B\[结束\]/)
+})
+
+test('a source hardlinked to the private config aborts with zero model calls and no writes', async (t) => {
+  const rootDir = await makeProject(t, {})
+  const secret = 'TRANSLATION_FAKE_CONFIG_SENTINEL_5c1d'
+  const configPath = path.join(rootDir, 'tools', 'config.yaml')
+  const sourcePath = path.join(rootDir, 'docs', 'zh-cn', 'index.md')
+  await mkdir(path.dirname(configPath), { recursive: true })
+  await writeFile(configPath, secret, 'utf8')
+  await link(configPath, sourcePath)
+
+  const { requestModel: underlying } = fakeModel()
+  let modelCalls = 0
+  const requestModel = async (request) => {
+    modelCalls += 1
+    return underlying(request)
+  }
+  const errors = []
+  const code = await main(['--write', '--only', 'docs/zh-cn/index.md'], {
+    rootDir,
+    requestModel,
+    log: () => {},
+    errorLog: (line) => errors.push(line)
+  })
+
+  assert.equal(code, 1)
+  assert.equal(modelCalls, 0)
+  await assert.rejects(
+    readFile(path.join(rootDir, 'docs', 'en', 'index.md'), 'utf8'),
+    { code: 'ENOENT' }
+  )
+  assert.match(errors.join('\n'), /无法安全读取 Markdown 源文件/)
+  assert.ok(!errors.join('\n').includes(secret))
+})
+
+test('a parent-directory swap during a source read aborts with zero model calls and no writes', async (t) => {
+  const rootDir = await makeProject(t, {
+    'docs/zh-cn/index.md': '# 标题\n\n欢迎。\n'
+  })
+  const sourcePath = path.join(rootDir, 'docs', 'zh-cn', 'index.md')
+  const sourceParent = path.dirname(sourcePath)
+  let modelCalls = 0
+  const fs = {
+    open: async (target, flags) => {
+      const real = await import('node:fs/promises')
+      const handle = await real.open(target, flags)
+      return {
+        stat: (...args) => handle.stat(...args),
+        close: () => handle.close(),
+        readFile: async (options) => {
+          const content = await handle.readFile(options)
+          await real.rename(sourceParent, `${sourceParent}-moved`)
+          await real.mkdir(sourceParent, { recursive: true })
+          await real.writeFile(sourcePath, '# 替换\n\n替换。\n', 'utf8')
+          return content
+        }
+      }
+    }
+  }
+  const { requestModel: underlying } = fakeModel()
+  const requestModel = async (request) => {
+    modelCalls += 1
+    return underlying(request)
+  }
+  const errors = []
+  const code = await main(['--write', '--only', 'docs/zh-cn/index.md'], {
+    rootDir,
+    fs,
+    requestModel,
+    log: () => {},
+    errorLog: (line) => errors.push(line)
+  })
+
+  assert.equal(code, 1)
+  assert.equal(modelCalls, 0)
+  await assert.rejects(
+    readFile(path.join(rootDir, 'docs', 'en', 'index.md'), 'utf8'),
+    { code: 'ENOENT' }
+  )
+  assert.match(errors.join('\n'), /无法安全读取 Markdown 源文件/)
 })

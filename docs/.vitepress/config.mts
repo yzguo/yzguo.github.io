@@ -9,10 +9,10 @@ import { zh_tw } from './zh-tw.ts'
 import { injectRootLanguageRedirect } from './theme/language-preference.mjs'
 import {
     assertPrivateModelConfigPlacement,
-    readAiSearchConfig,
+    readSiteConfig,
     resolveAiSearchEnabled,
     scanPublishableResources
-} from '../../tools/ai-search-config.mjs'
+} from '../../tools/site-config.mjs'
 
 const docsDirectory = path.resolve(
     fileURLToPath(new URL('..', import.meta.url))
@@ -22,6 +22,11 @@ const repositoryRoot = path.resolve(
 )
 const publicDirectory = path.join(docsDirectory, 'public')
 const nodeModulesDirectory = path.join(repositoryRoot, 'node_modules')
+const privateModelConfigPath = path.join(
+    repositoryRoot,
+    'tools',
+    'config.yaml'
+)
 
 const servedDirectories = [
     docsDirectory,
@@ -39,12 +44,14 @@ assertPrivateModelConfigPlacement({
 })
 
 /*
- * One public boolean controls AI search. `ai-search.config.json` is read only
- * by this config file; the browser receives only the resolved
- * `__AI_SEARCH_ENABLED__` boolean, never the config object or any server
- * setting.
+ * The root `config.json` is the only source of public feature switches:
+ * `aiSearch.enabled` and `performance.prefetchLinks`. It is read only by this
+ * config file; the browser receives only the resolved
+ * `__AI_SEARCH_ENABLED__` boolean and the VitePress router option, never the
+ * config object or any server setting. Unknown fields are rejected so private
+ * provider configuration cannot enter a published file.
  *
- * - Development (`command === 'serve'`) honours the switch.
+ * - Development (`command === 'serve'`) honours the AI switch.
  * - Production (`command === 'build'`) is always disabled. GitHub Pages is
  *   static and cannot host model credentials or a secure model backend.
  *
@@ -54,7 +61,7 @@ assertPrivateModelConfigPlacement({
  * When the switch is off, the middleware still answers the endpoint with an
  * explicit JSON refusal; it never builds the index or calls a model.
  */
-const aiSearchConfig = readAiSearchConfig()
+const siteConfig = readSiteConfig()
 
 function aiSearchPlugin(): Plugin {
     return {
@@ -62,7 +69,7 @@ function aiSearchPlugin(): Plugin {
         config(_config, env) {
             const enabled = resolveAiSearchEnabled(
                 env.command,
-                aiSearchConfig
+                siteConfig
             )
             return {
                 // This is the only value the client receives.
@@ -72,7 +79,7 @@ function aiSearchPlugin(): Plugin {
             }
         },
         async configureServer(server) {
-            const enabled = resolveAiSearchEnabled('serve', aiSearchConfig)
+            const enabled = resolveAiSearchEnabled('serve', siteConfig)
             const toolsPath = path.resolve(
                 server.config.root,
                 '..',
@@ -84,7 +91,11 @@ function aiSearchPlugin(): Plugin {
             )
             attachLocalAiSearch(server, {
                 docsRoot: server.config.root,
-                enabled
+                enabled,
+                modelConfigPath: privateModelConfigPath,
+                ...(process.env.AI_MODEL_CONFIG
+                    ? { aiModelConfig: process.env.AI_MODEL_CONFIG }
+                    : {})
             })
         },
         buildStart() {
@@ -93,11 +104,7 @@ function aiSearchPlugin(): Plugin {
             scanPublishableResources({
                 docsRoot: docsDirectory,
                 publicDir: publicDirectory,
-                modelConfigPath: path.join(
-                    repositoryRoot,
-                    'tools',
-                    'model-config.yaml'
-                ),
+                modelConfigPath: privateModelConfigPath,
                 aiModelConfig: process.env.AI_MODEL_CONFIG,
                 repositoryRoot,
                 baseDirectory: process.cwd()
@@ -166,6 +173,14 @@ function languageEntryPlugin(): Plugin {
 export default defineConfig({
     ...shared,
     ...headConfig,
+    /*
+     * `performance.prefetchLinks` is off by default so a cold first paint does
+     * not fetch other pages, including the other locale homepages. Setting it
+     * to true in the public config restores VitePress's idle-time prefetch.
+     */
+    router: {
+        prefetchLinks: siteConfig.performance.prefetchLinks,
+    },
     markdown: {
         math: true,
         config(md) {

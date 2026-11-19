@@ -1,17 +1,19 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { link, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import {
   analyzeMarkdown,
-  checkBilingual,
+  checkMultilingual,
   compareStructures,
   compareUiConfigurations,
-  getMarkdownParser,
+  parseBatchVerdicts,
   parseCheckerArgs,
-  parseVerdict
-} from './check-bilingual.mjs'
+  parseVerdict,
+  semanticBatchLimits
+} from './check-multilingual.mjs'
+import { getMarkdownParser } from './markdown-safety.mjs'
 import {
   convertMarkdownToTraditional,
   convertTextToTraditional
@@ -60,15 +62,41 @@ async function parser(rootDir) {
   return getMarkdownParser(path.join(rootDir, 'docs'))
 }
 
+function batchIds(prompt) {
+  return [...prompt.matchAll(/ITEM id="([^"]+)"/g)].map((match) => match[1])
+}
+
+function batchItemBlock(prompt, id) {
+  const marker = `ITEM id="${id}"`
+  const start = prompt.indexOf(marker)
+  if (start === -1) return ''
+  const end = prompt.indexOf('<<<END ITEM', start)
+  return prompt.slice(start, end === -1 ? undefined : end)
+}
+
+function batchReply(prompt, decide = () => ({ equivalent: true, issues: [] })) {
+  const ids = batchIds(prompt)
+  assert.ok(ids.length > 0, 'expected a batch prompt with item ids')
+  return JSON.stringify({
+    results: ids.map((id) => {
+      const verdict = decide(id, batchItemBlock(prompt, id)) ?? {
+        equivalent: true,
+        issues: []
+      }
+      return { id, equivalent: verdict.equivalent, issues: verdict.issues ?? [] }
+    })
+  })
+}
+
 function successfulRequest(verdict, seen = []) {
   return async ({ prompt }) => {
     seen.push(prompt)
-    return JSON.stringify(verdict)
+    return batchReply(prompt, () => verdict)
   }
 }
 
-function validResult() {
-  return '{"equivalent":true,"issues":[]}'
+function validResult(prompt) {
+  return batchReply(prompt)
 }
 
 function isEnglishPrompt(prompt, file = 'index.md') {
@@ -144,7 +172,7 @@ function matchingSiteConfigs() {
 }
 
 function checkWithConfig(options) {
-  return checkBilingual({
+  return checkMultilingual({
     loadSiteConfigs: async () => matchingSiteConfigs(),
     ...options
   })
@@ -187,6 +215,11 @@ test('Markdown structure ignores headings and comments inside fenced code', asyn
   assert.deepEqual(structure.headings, [1])
   assert.deepEqual(structure.codeBlocks, ['python', 'markdown'])
   assert.deepEqual(structure.tables, [{ rows: 2, columns: 2 }])
+  assert.deepEqual(structure.tableRows, [[2, 2]])
+  assert.deepEqual(
+    structure.contentStructure.map((node) => node.kind),
+    ['heading:1', 'code', 'code', 'table']
+  )
   assert.deepEqual(structure.blocks, ['heading:1', 'code', 'code', 'table'])
 })
 
@@ -266,13 +299,85 @@ test('verdict parsing accepts only a complete structured verdict', () => {
   assert.throws(() => parseVerdict('{"equivalent":true,"issues":[1]}'), /non-empty strings/)
 })
 
+test('batch verdict parsing requires exactly one valid result per id', () => {
+  const valid = JSON.stringify({
+    results: [
+      { id: 'a', equivalent: true, issues: [] },
+      { id: 'b', equivalent: false, issues: ['missing item'] }
+    ]
+  })
+  const parsed = parseBatchVerdicts(valid, ['a', 'b'])
+  assert.deepEqual(parsed.get('a'), { id: 'a', equivalent: true, issues: [] })
+  assert.deepEqual(parsed.get('b'), {
+    id: 'b',
+    equivalent: false,
+    issues: ['missing item']
+  })
+  assert.deepEqual(
+    [...parseBatchVerdicts(`\`\`\`json\n${valid}\n\`\`\``, ['a', 'b']).keys()],
+    ['a', 'b']
+  )
+
+  const results = (items) => JSON.stringify({ results: items })
+  assert.throws(
+    () => parseBatchVerdicts(results([{ id: 'a', equivalent: true, issues: [] }]), ['a', 'b']),
+    /missing ids: b/
+  )
+  assert.throws(
+    () => parseBatchVerdicts(results([
+      { id: 'a', equivalent: true, issues: [] },
+      { id: 'a', equivalent: true, issues: [] }
+    ]), ['a', 'b']),
+    /duplicate ids: a/
+  )
+  assert.throws(
+    () => parseBatchVerdicts(results([
+      { id: 'a', equivalent: true, issues: [] },
+      { id: 'c', equivalent: true, issues: [] }
+    ]), ['a', 'b']),
+    /unknown ids/
+  )
+  assert.throws(
+    () => parseBatchVerdicts(results([{ id: 'a', equivalent: true, issues: [] }]), ['a', 'b']),
+    /returned 1 results for 2 items/
+  )
+  assert.throws(
+    () => parseBatchVerdicts(JSON.stringify({ results: [], extra: true }), ['a']),
+    /exactly one "results" field/
+  )
+  assert.throws(
+    () => parseBatchVerdicts(results([{ id: 'a', equivalent: true }]), ['a']),
+    /exactly "id", "equivalent", and "issues" fields/
+  )
+  assert.throws(
+    () => parseBatchVerdicts(results([{ id: 'a', equivalent: false, issues: [] }]), ['a']),
+    /provides no issues/
+  )
+  assert.throws(
+    () => parseBatchVerdicts(results([{ id: 'a', equivalent: true, issues: ['x'] }]), ['a']),
+    /also reports issues/
+  )
+  assert.throws(
+    () => parseBatchVerdicts(results([{ id: 'a', equivalent: true, issues: [1] }]), ['a']),
+    /non-empty strings/
+  )
+  assert.throws(() => parseBatchVerdicts('not json', ['a']), /not valid JSON/)
+  assert.throws(
+    () => parseBatchVerdicts('not-json-secret-value', ['a']),
+    (error) => /not valid JSON/.test(error.message) && !error.message.includes('secret-value')
+  )
+})
+
 test('checker CLI accepts and validates --timeout', () => {
   assert.deepEqual(parseCheckerArgs(['--timeout', '1234']), {
     rootDir: undefined,
     timeoutMs: 1234,
+    structureOnly: false,
     help: false
   })
   assert.equal(parseCheckerArgs(['--timeout=250']).timeoutMs, 250)
+  assert.equal(parseCheckerArgs(['--structure-only']).structureOnly, true)
+  assert.equal(parseCheckerArgs([]).structureOnly, false)
   assert.throws(() => parseCheckerArgs(['--timeout', '0']), /--timeout/)
   assert.throws(() => parseCheckerArgs(['--timeout=abc']), /--timeout/)
   assert.throws(() => parseCheckerArgs(['--timeout', '2147483648']), /--timeout/)
@@ -281,14 +386,15 @@ test('checker CLI accepts and validates --timeout', () => {
 test('checker passes its timeout to every model request', async (t) => {
   const rootDir = await basicProject(t)
   const timeouts = []
-  const requestModel = async ({ timeoutMs }) => {
+  const requestModel = async ({ prompt, timeoutMs }) => {
     timeouts.push(timeoutMs)
-    return validResult()
+    return validResult(prompt)
   }
   const result = await checkWithConfig({ rootDir, requestModel, timeoutMs: 4321 })
 
   assert.deepEqual(result.errors, [])
-  assert.ok(timeouts.length >= 6)
+  assert.ok(timeouts.length >= 1)
+  assert.ok(timeouts.length < 6)
   assert.ok(timeouts.every((value) => value === 4321))
 })
 
@@ -377,14 +483,23 @@ test('a passing check reviews docs and the root README triple with frontmatter',
   assert.deepEqual(result.errors, [])
   assert.equal(result.pairCount, 2)
   assert.equal(result.uiChecked, true)
-  assert.equal(prompts.length, 6)
+  assert.ok(prompts.length > 0)
+  assert.ok(prompts.length < 6)
+  assert.deepEqual(prompts.flatMap(batchIds), [
+    'page-1-en',
+    'page-1-zh-tw',
+    'page-2-en',
+    'page-2-zh-tw',
+    'ui-en',
+    'ui-zh-tw'
+  ])
 
   const docsPrompt = prompts.find((prompt) => isEnglishPrompt(prompt))
   const docsTraditionalPrompt = prompts.find((prompt) => isTraditionalPrompt(prompt))
   const readmePrompt = prompts.find((prompt) =>
     prompt.includes('Page pair: README.md vs README.zh-CN.md')
   )
-  const configPrompts = prompts.filter((prompt) => prompt.includes('Configuration pair:'))
+  const joined = prompts.join('\n')
 
   assert.ok(docsPrompt)
   assert.match(docsPrompt, /title: Home/)
@@ -397,25 +512,32 @@ test('a passing check reviews docs and the root README triple with frontmatter',
   assert.ok(readmePrompt)
   assert.match(readmePrompt, /English readme\./)
   assert.match(readmePrompt, /中文说明。/)
-  assert.equal(configPrompts.length, 2)
-  assert.ok(configPrompts.some((prompt) => prompt.includes('English description.')))
-  assert.ok(configPrompts.some((prompt) => prompt.includes('繁體中文描述。')))
-  assert.match(configPrompts[0], /untrusted data/)
+  assert.match(joined, /Configuration pair:/)
+  assert.match(joined, /English description\./)
+  assert.match(joined, /繁體中文描述。/)
+  assert.match(joined, /untrusted data/)
 })
 
 test('semantic reviews are not cached between check runs', async (t) => {
   const rootDir = await basicProject(t)
-  const prompts = []
-  const requestModel = successfulRequest({ equivalent: true, issues: [] }, prompts)
+  const firstPrompts = []
+  const secondPrompts = []
 
-  const first = await checkWithConfig({ rootDir, requestModel })
-  const second = await checkWithConfig({ rootDir, requestModel })
+  const first = await checkWithConfig({
+    rootDir,
+    requestModel: successfulRequest({ equivalent: true, issues: [] }, firstPrompts)
+  })
+  const second = await checkWithConfig({
+    rootDir,
+    requestModel: successfulRequest({ equivalent: true, issues: [] }, secondPrompts)
+  })
 
   assert.deepEqual(first.errors, [])
   assert.deepEqual(second.errors, [])
   assert.equal(first.pairCount, 2)
   assert.equal(second.pairCount, 2)
-  assert.equal(prompts.length, 12)
+  assert.ok(firstPrompts.length > 0)
+  assert.deepEqual(firstPrompts.flatMap(batchIds), secondPrompts.flatMap(batchIds))
 })
 
 test('the root README triple is required', async (t) => {
@@ -428,12 +550,14 @@ test('the root README triple is required', async (t) => {
   })
 
   assert.equal(result.pairCount, 1)
-  assert.equal(prompts.length, 4)
+  assert.equal(prompts.length, 0)
+  assert.equal(result.semanticChecked, false)
   assert.match(result.errors.join('\n'), /Missing README triple/)
   assert.match(result.errors.join('\n'), /README\.zh-TW\.md/)
+  assert.match(result.errors.join('\n'), /阶段一（结构）/)
 })
 
-test('semantic review still runs on every triple when structure checks fail', async (t) => {
+test('any structure error blocks every semantic model request', async (t) => {
   const rootDir = await makeProject(t)
   const md = await parser(rootDir)
   await addPage(rootDir, 'index.md', {
@@ -453,12 +577,14 @@ test('semantic review still runs on every triple when structure checks fail', as
   })
 
   assert.equal(result.pairCount, 3)
-  assert.equal(prompts.length, 8)
+  assert.equal(prompts.length, 0)
+  assert.equal(result.semanticChecked, false)
   assert.match(result.errors.join('\n'), /heading levels differ/)
-  assert.doesNotMatch(result.errors.join('\n'), /semantic review failed/)
+  assert.match(result.errors.join('\n'), /阶段一（结构）/)
+  assert.doesNotMatch(result.errors.join('\n'), /阶段二（语义）/)
 })
 
-test('semantic review rejects mismatched protected content locally', async (t) => {
+test('phase one rejects mismatched protected code before any model request', async (t) => {
   const rootDir = await makeProject(t)
   const md = await parser(rootDir)
   await addPage(rootDir, 'index.md', {
@@ -473,34 +599,40 @@ test('semantic review rejects mismatched protected content locally', async (t) =
   })
 
   assert.ok(result.errors.some((error) => /本地受保护代码内容不一致/.test(error)))
-  assert.ok(!prompts.some((prompt) => isEnglishPrompt(prompt)))
+  assert.match(result.errors.join('\n'), /阶段一（结构）/)
+  assert.equal(prompts.length, 0)
+  assert.equal(result.semanticChecked, false)
 })
 
 test('a false semantic verdict fails with the reported issues', async (t) => {
   const rootDir = await basicProject(t)
-  const requestModel = async ({ prompt }) => {
-    if (!isEnglishPrompt(prompt)) return validResult()
-    return JSON.stringify({
-      equivalent: false,
-      issues: ['The Chinese page omits the external GitHub link.']
-    })
-  }
+  const requestModel = async ({ prompt }) => batchReply(prompt, (id, block) => (
+    block.includes('Page pair: docs/en/index.md vs docs/zh-cn/index.md')
+      ? {
+          equivalent: false,
+          issues: ['The Chinese page omits the external GitHub link.']
+        }
+      : { equivalent: true, issues: [] }
+  ))
   const result = await checkWithConfig({ rootDir, requestModel })
 
   assert.equal(result.errors.length, 1)
+  assert.equal(result.semanticChecked, true)
+  assert.match(result.errors[0], /阶段二（语义）/)
   assert.match(result.errors[0], /docs\/en\/index\.md vs docs\/zh-cn\/index\.md: semantic mismatch/)
   assert.match(result.errors[0], /omits the external GitHub link/)
 })
 
 test('a README semantic mismatch is reported with its paths', async (t) => {
   const rootDir = await basicProject(t)
-  const requestModel = async ({ prompt }) => {
-    if (!prompt.includes('Page pair: README.md vs README.zh-CN.md')) return validResult()
-    return JSON.stringify({
-      equivalent: false,
-      issues: ['The Chinese README omits the deployment note.']
-    })
-  }
+  const requestModel = async ({ prompt }) => batchReply(prompt, (id, block) => (
+    block.includes('Page pair: README.md vs README.zh-CN.md')
+      ? {
+          equivalent: false,
+          issues: ['The Chinese README omits the deployment note.']
+        }
+      : { equivalent: true, issues: [] }
+  ))
   const result = await checkWithConfig({ rootDir, requestModel })
 
   assert.equal(result.errors.length, 1)
@@ -588,15 +720,14 @@ test('a config semantic mismatch is reported with its paths', async (t) => {
   const rootDir = await basicProject(t)
   const siteConfigs = matchingSiteConfigs()
   siteConfigs.traditionalConfig.themeConfig.editLink.text = '刪除此頁'
-  const requestModel = async ({ prompt }) => {
-    if (prompt.includes('Configuration pair:') && prompt.includes('TRADITIONAL CHINESE UI')) {
-      return JSON.stringify({
-        equivalent: false,
-        issues: ['The Traditional Chinese edit link says delete instead of edit.']
-      })
-    }
-    return validResult()
-  }
+  const requestModel = async ({ prompt }) => batchReply(prompt, (id, block) => (
+    block.includes('Configuration pair:') && block.includes('TRADITIONAL CHINESE UI')
+      ? {
+          equivalent: false,
+          issues: ['The Traditional Chinese edit link says delete instead of edit.']
+        }
+      : { equivalent: true, issues: [] }
+  ))
   const result = await checkWithConfig({
     rootDir,
     loadSiteConfigs: async () => siteConfigs,
@@ -617,13 +748,15 @@ test('a config semantic failure fails the check', async (t) => {
     if (prompt.includes('Configuration pair:') && prompt.includes('ENGLISH UI')) {
       throw new Error('model service unavailable ENOENT')
     }
-    return validResult()
+    return validResult(prompt)
   }
   const result = await checkWithConfig({ rootDir, requestModel })
 
   assert.equal(result.errors.length, 1)
   assert.match(result.errors[0], /docs\/\.vitepress\/en-us\.ts/)
-  assert.match(result.errors[0], /semantic review \(English\) failed/)
+  assert.match(result.errors[0], /语义批次 \d+\/\d+ 请求失败/)
+  assert.match(result.errors[0], /ui-en=/)
+  assert.match(result.errors[0], /\(English\)/)
   assert.match(result.errors[0], /无法调用模型/)
   assert.match(result.errors[0], /ENOENT/)
 })
@@ -647,17 +780,18 @@ test('a config load failure fails and is not silently skipped', async (t) => {
 test('an unparseable semantic verdict fails the check', async (t) => {
   const rootDir = await basicProject(t)
   const requestModel = async ({ prompt }) =>
-    isEnglishPrompt(prompt) ? '{"equivalent":true}' : validResult()
+    isEnglishPrompt(prompt) ? 'the batch looks fine' : validResult(prompt)
   const result = await checkWithConfig({ rootDir, requestModel })
 
   assert.equal(result.errors.length, 1)
-  assert.match(result.errors[0], /issues/)
+  assert.match(result.errors[0], /not valid JSON/)
+  assert.match(result.errors[0], /语义批次 \d+\/\d+ 请求失败/)
 })
 
 test('an authentication failure fails the check', async (t) => {
   const rootDir = await basicProject(t)
   const requestModel = async ({ prompt }) => {
-    if (!isEnglishPrompt(prompt)) return validResult()
+    if (!isEnglishPrompt(prompt)) return validResult(prompt)
     throw new Error('401 Unauthorized: invalid model credentials')
   }
   const result = await checkWithConfig({ rootDir, requestModel })
@@ -665,12 +799,13 @@ test('an authentication failure fails the check', async (t) => {
   assert.equal(result.errors.length, 1)
   assert.match(result.errors[0], /无法调用模型/)
   assert.match(result.errors[0], /401 Unauthorized/)
+  assert.match(result.errors[0], /语义批次 \d+\/\d+ 请求失败/)
 })
 
 test('a missing model service fails the check', async (t) => {
   const rootDir = await basicProject(t)
   const requestModel = async ({ prompt }) => {
-    if (!isEnglishPrompt(prompt)) return validResult()
+    if (!isEnglishPrompt(prompt)) return validResult(prompt)
     throw new Error('Unable to reach model service: ENOENT')
   }
   const result = await checkWithConfig({ rootDir, requestModel })
@@ -692,11 +827,11 @@ test('missing locale counterparts fail and are not sent to the model', async (t)
 
   assert.equal(result.pairCount, 1)
   assert.equal(result.uiChecked, true)
-  assert.equal(prompts.length, 4)
-  assert.ok(prompts.some((prompt) => /Page pair: README\.md vs README\.zh-CN\.md/.test(prompt)))
-  assert.doesNotMatch(prompts.join('\n'), /docs\/en\/index\.md/)
+  assert.equal(prompts.length, 0)
+  assert.equal(result.semanticChecked, false)
   assert.match(result.errors.join('\n'), /Missing zh-cn page: docs\/zh-cn\/index\.md/)
   assert.match(result.errors.join('\n'), /Missing zh-tw page: docs\/zh-tw\/index\.md/)
+  assert.match(result.errors.join('\n'), /阶段一（结构）/)
 })
 
 test('root Chinese documents are paired with English and Traditional files', async (t) => {
@@ -742,7 +877,8 @@ test('a missing Traditional root document is reported, not silently ignored', as
   })
 
   assert.match(result.errors.join('\n'), /Missing Traditional Chinese page: 资料\.zh-TW\.md/)
-  assert.doesNotMatch(prompts.join('\n'), /资料\.md/)
+  assert.equal(prompts.length, 0)
+  assert.equal(result.semanticChecked, false)
 })
 
 test('HTML comments and private blocks are never sent to the semantic model', async (t) => {
@@ -792,6 +928,8 @@ test('an unclosed private block fails the check without calling the model for th
   })
 
   assert.match(result.errors.join('\n'), /Unclosed private block/)
+  assert.equal(prompts.length, 0)
+  assert.equal(result.semanticChecked, false)
   assert.doesNotMatch(prompts.join('\n'), /秘密/)
 })
 
@@ -805,14 +943,17 @@ test('a copied Simplified page is rejected as Traditional', async (t) => {
     traditional: chinese,
     md
   })
+  const prompts = []
   const result = await checkWithConfig({
     rootDir,
-    requestModel: successfulRequest({ equivalent: true, issues: [] })
+    requestModel: successfulRequest({ equivalent: true, issues: [] }, prompts)
   })
 
   assert.ok(result.errors.some((error) =>
     /繁中页面仍含未转换的简体内容/.test(error)
   ))
+  assert.equal(prompts.length, 0)
+  assert.equal(result.semanticChecked, false)
 })
 
 test('wrong locale link prefixes fail the trilingual check', async (t) => {
@@ -823,14 +964,17 @@ test('wrong locale link prefixes fail the trilingual check', async (t) => {
     chinese: '# 首页\n\n[笔记](/zh-cn/Notes/)\n',
     md
   })
+  const prompts = []
   const result = await checkWithConfig({
     rootDir,
-    requestModel: successfulRequest({ equivalent: true, issues: [] })
+    requestModel: successfulRequest({ equivalent: true, issues: [] }, prompts)
   })
 
   assert.ok(result.errors.some((error) =>
     /docs\/en\/index\.md: 站内链接 \/zh-cn\/Notes\/ 的语言前缀与 \/en\/ 不一致/.test(error)
   ))
+  assert.equal(prompts.length, 0)
+  assert.equal(result.semanticChecked, false)
 })
 
 test('Traditional page structure differences are reported', async (t) => {
@@ -842,12 +986,15 @@ test('Traditional page structure differences are reported', async (t) => {
     traditional: '# 首頁\n\n### 歡迎。\n',
     md
   })
+  const prompts = []
   const result = await checkWithConfig({
     rootDir,
-    requestModel: successfulRequest({ equivalent: true, issues: [] })
+    requestModel: successfulRequest({ equivalent: true, issues: [] }, prompts)
   })
 
   assert.match(result.errors.join('\n'), /docs\/zh-tw\/index\.md vs docs\/zh-cn\/index\.md: heading levels differ/)
+  assert.equal(prompts.length, 0)
+  assert.equal(result.semanticChecked, false)
 })
 
 test('the docs root redirect entry is not part of locale pairing', async (t) => {
@@ -876,3 +1023,522 @@ test('an unexpected English page at the docs root is reported', async (t) => {
 
   assert.match(result.errors.join('\n'), /Unexpected root Markdown page/)
 })
+
+test('structure-only completes phase one without any model request', async (t) => {
+  const rootDir = await basicProject(t)
+  let calls = 0
+  const result = await checkMultilingual({
+    rootDir,
+    loadSiteConfigs: async () => matchingSiteConfigs(),
+    structureOnly: true,
+    requestModel: async () => {
+      calls += 1
+      throw new Error('structure-only must not call the model')
+    }
+  })
+
+  assert.deepEqual(result.errors, [])
+  assert.equal(result.structureChecked, true)
+  assert.equal(result.semanticChecked, false)
+  assert.equal(calls, 0)
+})
+
+test('a visible UI configuration error blocks every semantic model request', async (t) => {
+  const rootDir = await basicProject(t)
+  const configs = matchingSiteConfigs()
+  delete configs.traditionalConfig.themeConfig.editLink.text
+  let calls = 0
+  const result = await checkMultilingual({
+    rootDir,
+    loadSiteConfigs: async () => configs,
+    requestModel: async ({ prompt }) => {
+      calls += 1
+      return validResult(prompt)
+    }
+  })
+
+  assert.match(
+    result.errors.join('\n'),
+    /visible UI field "themeConfig\.editLink\.text".*missing in Traditional Chinese/
+  )
+  assert.match(result.errors.join('\n'), /阶段一（结构）/)
+  assert.equal(result.semanticChecked, false)
+  assert.equal(calls, 0)
+})
+
+test('formula, Mermaid structure, and link-target differences all block the model', async (t) => {
+  const rootDir = await makeProject(t)
+  const md = await parser(rootDir)
+  await addPage(rootDir, 'index.md', {
+    english: [
+      '# Home',
+      '',
+      'Formula $x$.',
+      '',
+      '```mermaid',
+      'flowchart TD',
+      '  A --> B',
+      '```',
+      '',
+      '[external](https://one.example/path)',
+      ''
+    ].join('\n'),
+    chinese: [
+      '# 首页',
+      '',
+      '公式 $y$。',
+      '',
+      '```mermaid',
+      'sequenceDiagram',
+      '  A->>B: 你好',
+      '```',
+      '',
+      '[外部](https://two.example/path)',
+      ''
+    ].join('\n'),
+    md
+  })
+  let calls = 0
+  const result = await checkMultilingual({
+    rootDir,
+    loadSiteConfigs: async () => matchingSiteConfigs(),
+    requestModel: async ({ prompt }) => {
+      calls += 1
+      return validResult(prompt)
+    }
+  })
+
+  const errors = result.errors.join('\n')
+  assert.match(errors, /本地受保护公式内容不一致/)
+  assert.match(errors, /链接目标或 URL\s*不一致/)
+  assert.match(errors, /本地受保护Mermaid 结构不一致/)
+  assert.match(errors, /阶段一（结构）/)
+  assert.equal(result.semanticChecked, false)
+  assert.equal(calls, 0)
+})
+
+test('a config load failure blocks every semantic model request', async (t) => {
+  const rootDir = await basicProject(t)
+  const prompts = []
+  const result = await checkMultilingual({
+    rootDir,
+    loadSiteConfigs: async () => {
+      throw new Error('cannot parse VitePress config')
+    },
+    requestModel: successfulRequest({ equivalent: true, issues: [] }, prompts)
+  })
+
+  assert.equal(result.uiChecked, false)
+  assert.match(result.errors.join('\n'), /unable to load VitePress locale configuration/)
+  assert.equal(result.semanticChecked, false)
+  assert.equal(prompts.length, 0)
+})
+
+test('a successful check reviews each page pair and each UI pair exactly once', async (t) => {
+  const rootDir = await makeProject(t)
+  const md = await parser(rootDir)
+  await addPage(rootDir, 'index.md', {
+    english: '# Home\n\nWelcome.\n',
+    chinese: '# 首页\n\n欢迎。\n',
+    md
+  })
+  await addPage(rootDir, 'About/index.md', {
+    english: '# About\n\nProfile.\n',
+    chinese: '# 关于\n\n简介。\n',
+    md
+  })
+  const prompts = []
+  const result = await checkWithConfig({
+    rootDir,
+    requestModel: successfulRequest({ equivalent: true, issues: [] }, prompts)
+  })
+
+  assert.deepEqual(result.errors, [])
+  assert.equal(result.pairCount, 3)
+  assert.equal(result.semanticChecked, true)
+  const ids = prompts.flatMap(batchIds)
+  assert.deepEqual(ids, [
+    'page-1-en',
+    'page-1-zh-tw',
+    'page-2-en',
+    'page-2-zh-tw',
+    'page-3-en',
+    'page-3-zh-tw',
+    'ui-en',
+    'ui-zh-tw'
+  ])
+  assert.equal(new Set(ids).size, ids.length)
+  const joined = prompts.join('\n')
+  assert.equal((joined.match(/Page pair:/g) ?? []).length, 6)
+  assert.equal((joined.match(/Configuration pair:/g) ?? []).length, 2)
+  assert.ok(prompts.some((prompt) => isEnglishPrompt(prompt, 'About/index.md')))
+  assert.ok(prompts.some((prompt) => isTraditionalPrompt(prompt, 'About/index.md')))
+})
+
+test('different nested list item counts block every semantic model request', async (t) => {
+  const rootDir = await makeProject(t)
+  const md = await parser(rootDir)
+  await addPage(rootDir, 'index.md', {
+    english: '# Home\n\n- First\n  - A\n  - B\n- Second\n',
+    chinese: '# 首页\n\n- 第一\n  - 甲\n- 第二\n',
+    md
+  })
+  const prompts = []
+  const result = await checkWithConfig({
+    rootDir,
+    requestModel: successfulRequest({ equivalent: true, issues: [] }, prompts)
+  })
+
+  const errors = result.errors.join('\n')
+  assert.match(errors, /content block structure differs/)
+  assert.match(errors, /child block count/)
+  assert.match(errors, /阶段一（结构）/)
+  assert.equal(result.semanticChecked, false)
+  assert.equal(prompts.length, 0)
+})
+
+test('list-item paragraph and blockquote position differences block the model', async (t) => {
+  const rootDir = await makeProject(t)
+  const md = await parser(rootDir)
+  await addPage(rootDir, 'index.md', {
+    english: '# Home\n\n- First\n\n  > Quoted note\n\n- Second\n',
+    chinese: '# 首页\n\n- 第一\n\n  引用文字。\n\n- 第二\n',
+    md
+  })
+  const prompts = []
+  const result = await checkWithConfig({
+    rootDir,
+    requestModel: successfulRequest({ equivalent: true, issues: [] }, prompts)
+  })
+
+  const errors = result.errors.join('\n')
+  assert.match(errors, /content block structure differs/)
+  assert.match(errors, /blockquote/)
+  assert.equal(result.semanticChecked, false)
+  assert.equal(prompts.length, 0)
+})
+
+test('a table row with fewer cells blocks every semantic model request', async (t) => {
+  const rootDir = await makeProject(t)
+  const md = await parser(rootDir)
+  await addPage(rootDir, 'index.md', {
+    english: '# Home\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n',
+    chinese: '# 首页\n\n| 甲 | 乙 |\n| --- | --- |\n| 1 |\n',
+    md
+  })
+  const prompts = []
+  const result = await checkWithConfig({
+    rootDir,
+    requestModel: successfulRequest({ equivalent: true, issues: [] }, prompts)
+  })
+
+  const errors = result.errors.join('\n')
+  assert.match(errors, /table row widths differ/)
+  assert.match(errors, /阶段一（结构）/)
+  assert.equal(result.semanticChecked, false)
+  assert.equal(prompts.length, 0)
+})
+
+test('phase two batches every page and UI pair within limits without omission', async (t) => {
+  const rootDir = await makeProject(t)
+  const md = await parser(rootDir)
+  for (let index = 0; index < 7; index += 1) {
+    await addPage(rootDir, `Topic${index}/index.md`, {
+      english: `# Topic ${index}\n\nVisible profile ${index}.\n`,
+      chinese: `# 主题 ${index}\n\n可见简介 ${index}。\n`,
+      md
+    })
+  }
+  const prompts = []
+  const result = await checkWithConfig({
+    rootDir,
+    requestModel: successfulRequest({ equivalent: true, issues: [] }, prompts)
+  })
+
+  assert.deepEqual(result.errors, [])
+  assert.equal(result.pairCount, 8)
+  const ids = prompts.flatMap(batchIds)
+  assert.equal(ids.length, 8 * 2 + 2)
+  assert.equal(new Set(ids).size, ids.length)
+  assert.deepEqual(
+    [...ids].sort(),
+    [
+      'ui-en',
+      'ui-zh-tw',
+      ...Array.from({ length: 8 }, (_, index) => [
+        `page-${index + 1}-en`,
+        `page-${index + 1}-zh-tw`
+      ]).flat()
+    ].sort()
+  )
+  assert.ok(prompts.length > 1)
+  assert.ok(prompts.length < ids.length)
+  assert.ok(
+    prompts.every((prompt) => batchIds(prompt).length <= semanticBatchLimits.maxItems)
+  )
+})
+
+test('phase two splits the byte budget without dropping a large pair', async (t) => {
+  const rootDir = await makeProject(t)
+  const md = await parser(rootDir)
+  for (let index = 0; index < 2; index += 1) {
+    await addPage(rootDir, `Large${index}/index.md`, {
+      english: `# Large ${index}\n\n${'Visible paragraph text. '.repeat(150)}\n`,
+      chinese: `# 大型 ${index}\n\n${'可见段落文字。'.repeat(150)}\n`,
+      md
+    })
+  }
+  const prompts = []
+  const result = await checkWithConfig({
+    rootDir,
+    requestModel: successfulRequest({ equivalent: true, issues: [] }, prompts)
+  })
+
+  assert.deepEqual(result.errors, [])
+  const largePrompts = prompts.filter((prompt) =>
+    batchIds(prompt).some((id) => /^page-[12]-(en|zh-tw)$/.test(id))
+  )
+  for (const prompt of largePrompts) {
+    const largeIds = batchIds(prompt).filter((id) => /^page-[12]-(en|zh-tw)$/.test(id))
+    assert.equal(largeIds.length, 1, 'two large pairs must not share a batch')
+    assert.ok(batchIds(prompt).length <= semanticBatchLimits.maxItems)
+  }
+  assert.equal(largePrompts.length, 4)
+})
+
+test('a 429 batch failure reports every involved item and is not retried', async (t) => {
+  const rootDir = await makeProject(t)
+  const md = await parser(rootDir)
+  for (let index = 0; index < 7; index += 1) {
+    await addPage(rootDir, `Failure${index}/index.md`, {
+      english: `# Failure ${index}\n\nVisible text ${index}.\n`,
+      chinese: `# 失败 ${index}\n\n可见文字 ${index}。\n`,
+      md
+    })
+  }
+  const calls = []
+  const requestModel = async ({ prompt }) => {
+    const ids = batchIds(prompt)
+    calls.push(ids)
+    if (calls.length === 1) {
+      throw new Error('429 Too Many Requests: rate limit exceeded')
+    }
+    return batchReply(prompt)
+  }
+  const result = await checkWithConfig({ rootDir, requestModel })
+
+  assert.equal(result.semanticChecked, true)
+  assert.ok(calls.length >= 2)
+  const seen = calls.flat()
+  assert.equal(new Set(seen).size, seen.length, 'a failed batch must not be retried')
+  assert.equal(result.semanticErrors.length, 1)
+  const failure = result.errors.join('\n')
+  assert.match(failure, /语义批次 1\/\d+ 请求失败，涉及条目：/)
+  assert.match(failure, /429 Too Many Requests/)
+  for (const id of calls[0]) {
+    assert.match(failure, new RegExp(`${id}=`))
+  }
+})
+
+test('malformed batch ids fail the implicated batch without inventing verdicts', async (t) => {
+  const cases = [
+    ['missing', 'missing ids:'],
+    ['duplicate', 'duplicate ids:'],
+    ['unknown', 'unknown ids:']
+  ]
+  for (const [mode, expected] of cases) {
+    await t.test(mode, async (t) => {
+      const rootDir = await basicProject(t)
+      let calls = 0
+      const requestModel = async ({ prompt }) => {
+        calls += 1
+        if (calls > 1) return batchReply(prompt)
+        const ids = batchIds(prompt)
+        const results = ids.map((id) => ({ id, equivalent: true, issues: [] }))
+        if (mode === 'missing') {
+          results.pop()
+        } else if (mode === 'duplicate') {
+          results[results.length - 1] = { ...results[0] }
+        } else {
+          results[results.length - 1] = {
+            id: 'unknown-item',
+            equivalent: true,
+            issues: []
+          }
+        }
+        return JSON.stringify({ results })
+      }
+      const result = await checkWithConfig({ rootDir, requestModel })
+
+      assert.equal(result.semanticChecked, true)
+      assert.equal(result.semanticErrors.length, 1)
+      const failure = result.errors.join('\n')
+      assert.match(failure, /语义批次 1\/\d+ 请求失败，涉及条目：/)
+      assert.match(failure, new RegExp(expected))
+    })
+  }
+})
+
+test('a document larger than the multi-item budget is reviewed on its own', async (t) => {
+  const rootDir = await makeProject(t)
+  const md = await parser(rootDir)
+  await addPage(rootDir, 'index.md', {
+    english: `# Home\n\n${'Visible documentation. '.repeat(700)}\n`,
+    chinese: `# 首页\n\n${'可见说明。'.repeat(700)}\n`,
+    md
+  })
+  const prompts = []
+  const result = await checkWithConfig({
+    rootDir,
+    requestModel: successfulRequest({ equivalent: true, issues: [] }, prompts)
+  })
+  assert.deepEqual(result.errors, [])
+  for (const id of ['page-1-en', 'page-1-zh-tw']) {
+    const prompt = prompts.find((value) => batchIds(value).includes(id))
+    assert.ok(prompt, `missing semantic review for ${id}`)
+    assert.deepEqual(batchIds(prompt), [id])
+  }
+})
+
+test('a projected item above the byte cap fails explicitly without a model request', async (t) => {
+  const rootDir = await makeProject(t)
+  const md = await parser(rootDir)
+  await addPage(rootDir, 'index.md', {
+    english: `# Home\n\n${'OVERSIZED_SENTINEL '.repeat(Math.ceil(semanticBatchLimits.maxItemBytes / 18))}\n`,
+    chinese: `# 首页\n\n${'超长可见文字。'.repeat(Math.ceil(semanticBatchLimits.maxItemBytes / 18))}\n`,
+    md
+  })
+  const prompts = []
+  const result = await checkWithConfig({
+    rootDir,
+    requestModel: successfulRequest({ equivalent: true, issues: [] }, prompts)
+  })
+
+  assert.equal(result.semanticChecked, true)
+  const errors = result.errors.join('\n')
+  assert.match(errors, /语义检查单项过大/)
+  assert.match(errors, new RegExp(`安全上限 ${semanticBatchLimits.maxItemBytes} 字节`))
+  assert.match(errors, /未发送模型/)
+  assert.match(errors, /docs\/en\/index\.md vs docs\/zh-cn\/index\.md/)
+  assert.match(errors, /docs\/zh-tw\/index\.md vs docs\/zh-cn\/index\.md/)
+  assert.ok(prompts.length > 0)
+  assert.doesNotMatch(prompts.join('\n'), /OVERSIZED_SENTINEL/)
+})
+
+test('hard links to the protected model config block docs and README with zero model calls', async (t) => {
+  for (const relative of ['docs/en/index.md', 'README.md']) {
+    await t.test(relative, async (t) => {
+      const rootDir = await basicProject(t)
+      const configPath = path.join(rootDir, 'tools', 'config.yaml')
+      const sentinel = 'FAKE_PRIVATE_CONFIG_SENTINEL_9c41'
+      await mkdir(path.dirname(configPath), { recursive: true })
+      await writeFile(configPath, `apiKey: ${sentinel}\n`, 'utf8')
+      const target = path.join(rootDir, ...relative.split('/'))
+      await rm(target)
+      await link(configPath, target)
+
+      const prompts = []
+      const result = await checkWithConfig({
+        rootDir,
+        requestModel: successfulRequest({ equivalent: true, issues: [] }, prompts)
+      })
+
+      assert.equal(result.semanticChecked, false)
+      assert.equal(prompts.length, 0)
+      assert.match(result.errors.join('\n'), /无法安全读取 Markdown 源文件/)
+      assert.match(result.errors.join('\n'), /阶段一（结构）/)
+      assert.doesNotMatch(JSON.stringify(result), new RegExp(sentinel))
+    })
+  }
+})
+
+test('a symbolic link to the protected model config blocks phase one and all model calls', async (t) => {
+  const rootDir = await basicProject(t)
+  const configPath = path.join(rootDir, 'tools', 'config.yaml')
+  const sentinel = 'FAKE_PRIVATE_CONFIG_SENTINEL_5a72'
+  await mkdir(path.dirname(configPath), { recursive: true })
+  await writeFile(configPath, `apiKey: ${sentinel}\n`, 'utf8')
+  const readmePath = path.join(rootDir, 'README.md')
+  await rm(readmePath)
+  try {
+    await symlink(configPath, readmePath, 'file')
+  } catch (error) {
+    if (['EPERM', 'EACCES', 'UNKNOWN', 'EINVAL', 'ENOSYS'].includes(error.code)) {
+      t.skip(`symbolic links are unavailable: ${error.code}`)
+      return
+    }
+    throw error
+  }
+
+  const prompts = []
+  const result = await checkWithConfig({
+    rootDir,
+    requestModel: successfulRequest({ equivalent: true, issues: [] }, prompts)
+  })
+
+  assert.equal(result.semanticChecked, false)
+  assert.equal(prompts.length, 0)
+  assert.match(result.errors.join('\n'), /无法安全读取 Markdown 源文件/)
+  assert.match(result.errors.join('\n'), /阶段一（结构）/)
+  assert.doesNotMatch(JSON.stringify(result), new RegExp(sentinel))
+})
+
+test('homepage frontmatter array and visible-key differences block the model', async (t) => {
+  const rootDir = await makeProject(t)
+  const md = await parser(rootDir)
+  const englishFrontmatter = [
+    '---',
+    'layout: home',
+    'hero:',
+    '  name: Home',
+    '  actions:',
+    '    - text: One',
+    '      link: /en/One/',
+    '    - text: Two',
+    '      link: /en/Two/',
+    'features:',
+    '  - title: A',
+    '    details: B',
+    '    link: /en/A/',
+    '    linkText: Open',
+    '---'
+  ].join('\n')
+  const chineseFrontmatter = [
+    '---',
+    'layout: home',
+    'hero:',
+    '  name: 首页',
+    '  actions:',
+    '    - text: 一',
+    '      link: /zh-cn/One/',
+    'features:',
+    '  - title: 甲',
+    '    details: 乙',
+    '    link: /zh-cn/A/',
+    '---'
+  ].join('\n')
+  await addPage(rootDir, 'index.md', {
+    english: `${englishFrontmatter}\n# Home\n\nWelcome.\n`,
+    chinese: `${chineseFrontmatter}\n# 首页\n\n欢迎。\n`,
+    md
+  })
+  const prompts = []
+  const result = await checkWithConfig({
+    rootDir,
+    requestModel: successfulRequest({ equivalent: true, issues: [] }, prompts)
+  })
+
+  const errors = result.errors.join('\n')
+  assert.match(
+    errors,
+    /首页可见 frontmatter hero\.actions 数组项数不一致/
+  )
+  assert.match(
+    errors,
+    /首页可见 frontmatter features\[0\]\.linkText 在 Simplified Chinese 中缺失/
+  )
+  assert.match(errors, /阶段一（结构）/)
+  assert.equal(result.semanticChecked, false)
+  assert.equal(prompts.length, 0)
+})
+

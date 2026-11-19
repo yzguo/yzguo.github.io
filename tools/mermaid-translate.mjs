@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
-import { hasCjk } from './document-mapping.mjs'
-import { assertSafeGeneratedMarkup } from './markdown-security.mjs'
+import { hasCjk } from './document-model.mjs'
+import { assertSafeGeneratedMarkup } from './markdown-safety.mjs'
 
 // Reader-visible Mermaid labels are translated separately from the page body.
 // The model only receives label text; node ids, diagram type, arrows, styling,

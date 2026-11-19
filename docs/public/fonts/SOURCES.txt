@@ -18,25 +18,38 @@ Noto Sans SC
   Version: Google Fonts v41 variable font (weights 100-900)
   License: SIL Open Font License 1.1 (see noto-sans-sc/OFL.txt)
   Upstream: https://fonts.google.com/noto/specimen/Noto+Sans+SC
-  Files: 46 fine-grained CJK/symbol slices, 39 site-character slices from
-  fallback fonts, and 98 fallback WOFF2 slices.
+  Files: 3 consolidated site faces plus the fine-grained CJK/symbol,
+  site-character and fallback WOFF2 slices described below.
+  The consolidated faces are noto-sans-sc-common.woff2 (Latin, punctuation,
+  language-menu labels and text symbols used by every page),
+  noto-sans-sc-site-cn.woff2 and noto-sans-sc-site-tw.woff2 (the CJK
+  characters and search labels rendered by each Chinese locale). They were
+  generated with Google Fonts' text-subset API from the same v41 variable
+  font, keep the 100-900 weight axis, and are bound to their locales by
+  docs/.vitepress/theme/style.css. Each consolidated @font-face unicode-range
+  is generated from the matching WOFF2 cmap; regenerate both together if a
+  consolidated file changes.
   CJK slices contain the site's interface characters, other site characters,
   and additional supported characters in separate unicode ranges. Symbol
   slices cover Greek, Cyrillic, kana, punctuation and related characters.
-  The fallback slices cover the remaining supported glyphs. Each slice is
-  restricted to its declared unicode range; the variable weight axis is kept.
+  The fallback slices cover the remaining supported glyphs, including any new
+  character outside the consolidated files. Each slice is restricted to its
+  declared unicode range; the variable weight axis is kept.
   Character ranks use the Jun Da Modern Chinese Character Frequency List,
   as distributed by hanziDB.csv (MIT).
-  Modification: two CSS families are built from these same local slices.
-  'Noto Sans SC Latin' is first in the site stack and declares the real Latin
-  text ranges present in slices 101 (Basic Latin, Latin-1, punctuation), 100
-  (Latin Extended-A/B and pinyin tone letters) and 099 (Vietnamese). It also
-  contains punctuation, digits and ©/®/™, but deliberately omits emoji
-  pictographs, ZWJ and PUA so those keep the icon/emoji faces that follow.
-  'Noto Sans SC' carries CJK, kana, Hangul, fullwidth forms and the symbol
-  tiers; its Latin-letter ranges are still excluded, so Latin text always
-  resolves to the Latin family. Both families are self-hosted; no CDN or
-  system font is involved.
+  Modification: typography uses four local families. 'Noto Sans SC Latin'
+  is first in the site stack and carries Basic Latin, Latin-1, punctuation,
+  digits, ©/®/™, the shared language-menu labels and the text symbols used by
+  current pages; the 100 (Latin Extended-A/B and pinyin tone letters) and 099
+  (Vietnamese) files remain separate. 'Noto Sans SC CN' and 'Noto Sans SC TW'
+  carry each Chinese locale's content and are bound by the page lang in
+  style.css. 'Noto Sans SC' remains the fine-grained fallback for other CJK,
+  kana, Hangul, fullwidth forms and symbols; its Latin-letter ranges are
+  excluded, so Latin text always resolves to the Latin family. Emoji
+  pictographs, ZWJ, PUA and emoji presentation selectors are deliberately
+  excluded from the Latin and CJK site faces so those keep the icon/emoji
+  faces that follow. All families are self-hosted; no CDN or system font is
+  involved.
   Subsets were generated from the variable font and retain the 100-900 axis.
 
 Noto Emoji

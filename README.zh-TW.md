@@ -2,7 +2,7 @@
 
 [English](README.md) | [簡體中文](README.zh-CN.md) | **繁體中文**
 
-一個使用 VitePress 建置、以 Markdown 撰寫、發佈在 GitHub Pages 上的個人網站。網站提供英文、簡體中文與繁體中文三個版本，三者的結構、事實與內容涵蓋範圍一致。本 README 是唯一的開發入口，說明安裝、撰寫、翻譯、檢查、安全與發佈流程。
+一個使用 VitePress 建置、以 Markdown 撰寫、發佈在 GitHub Pages 上的個人網站。網站提供英文、簡體中文與繁體中文三個版本，三者的結構、事實與內容涵蓋範圍一致。本 README 是唯一的開發入口，說明安裝、撰寫、翻譯、設定、檢查、安全與發佈流程。
 
 - English: <https://yzguo.github.io/en/>
 - 簡體中文: <https://yzguo.github.io/zh-cn/>
@@ -19,7 +19,7 @@
 ├─ README.zh-CN.md
 ├─ README.zh-TW.md
 ├─ package.json
-├─ ai-search.config.json
+├─ config.json
 ├─ docs/
 │  ├─ index.md
 │  ├─ en/
@@ -89,7 +89,7 @@
 - `docs/en/index.md`、`docs/zh-cn/index.md` 與 `docs/zh-tw/index.md`：保持對應的 hero 操作和功能卡片。
 - 頂層欄目、筆記分類和頁面數量必須在同一次修改中於三個語言版本同步增刪。
 
-## 工具與翻譯指令
+## 工具與設定
 
 所有開發工具都在 `tools/`；不要新建第二套工具目錄。`package.json` 中的公開指令名稱是穩定介面，修改內部實作時不得改名。
 
@@ -97,66 +97,87 @@
 pnpm translate:docs
 pnpm translate:docs:write
 pnpm translate:docs:force
-pnpm check:bilingual
-pnpm test:bilingual
-pnpm test:tools
+pnpm check:multilingual:structure
+pnpm check:multilingual
+pnpm test:multilingual
 ```
 
 - `pnpm translate:docs`：唯讀列出簡體中文來源及其英文、繁體中文目標；不寫檔案，也不呼叫模型。
 - `pnpm translate:docs:write`：只建立缺失目標。英文頁面由設定的本機模型翻譯；繁體中文頁面由本機 OpenCC 離線轉換；既有目標不會被覆寫。審閱每個產生檔案。
 - `pnpm translate:docs:force`：依相同規則重新產生既有英文和繁體中文目標並覆寫它們。
-- `pnpm check:bilingual`：檢查三個文件目錄、根目錄三份 README、其他受支援的根目錄中文文件、逐頁結構、事實、數學、程式碼和連結目標，以及從 `en-us.ts`、`zh-cn.ts`、`zh-tw.ts` 載入的可見介面文案。`docs/index.md` 是根入口，不參與配對。
-- `pnpm test:bilingual`：翻譯、三語檢查、隱私、路徑和寫入安全的行為測試。
-- `pnpm test:tools`：AI 適配器與 AI 搜尋的行為測試。
+- `pnpm check:multilingual:structure`：只執行第一階段（等價 CLI：`node tools/check-multilingual.mjs --structure-only`）。它確定性地檢查三個版本中每個頁面、README 和可見介面文案的語言涵蓋、結構、程式碼、數學、Mermaid、連結和設定，完成後直接結束，不呼叫模型。它不需要模型設定、憑證或網路。
+- `pnpm check:multilingual`：嚴格依序執行兩個階段。第一階段完整通過後，第二階段才會把清理後的配對內容傳送給設定的模型做語意審閱。第一階段有任何錯誤都代表零次模型請求。
+- `pnpm test:multilingual`：翻譯、兩階段多語言檢查、隱私、路徑和寫入安全的行為測試，包括第一階段失敗時絕不呼叫模型。
 
 翻譯指令接受 `-- --lang en|zh-tw` 或 `-- --only <path>` 以縮小範圍。翻譯保留程式碼、公式、數字和 URL 目標；流程圖、時序圖和狀態圖的 Mermaid 標籤依安全規則翻譯，無法安全處理時整批報錯且不寫入。
 
-- `tools/ai-model.mjs`、`tools/ai-search.mjs` 與 `tools/ai-search-config.mjs`：本機模型適配器、開發伺服器的 AI 搜尋端點、公開開關和發佈掃描。
-- `tools/check-bilingual.mjs`、`tools/translate-docs.mjs`、`tools/traditional-chinese.mjs` 與 `tools/locale-links.mjs`：三語檢查、翻譯命令列、OpenCC 轉換和逐版本連結對應。
-- `tools/model-config.yaml`：被 Git 忽略的預設私有模型設定；僅本機模型適配器在執行階段為認證讀取。人和 agent 不得讀取、列印、複製或提交它。
+- `tools/check-multilingual.mjs`：兩階段多語言檢查器。
+- `tools/translate-docs.mjs`：翻譯命令列入口。
+- `tools/document-model.mjs`、`tools/markdown-safety.mjs` 與 `tools/semantic-safe.mjs`：文件配對與結構、Markdown 隱私與寫入安全、語意審閱投影。
+- `tools/traditional-chinese.mjs` 與 `tools/mermaid-translate.mjs`：OpenCC 轉換檢查和安全的 Mermaid 標籤翻譯。
+- `tools/ai-model.mjs` 與 `tools/ai-search.mjs`：本機模型適配器和僅用於開發伺服器的 AI 搜尋端點。
+- `tools/site-config.mjs`：讀取並校驗根目錄公開的 `config.json`；它絕不讀取私有模型設定。
+- `tools/config.yaml`：唯一的預設私有工具設定；僅本機模型適配器在執行階段為認證和工具預設值讀取它。
 - `tools/*.test.mjs`：與實作同目錄的行為測試。
 
-### 本機 AI 搜尋與開關
+### 公開網站設定
 
-AI 搜尋是可選的本機開發功能，不會進入靜態生產網站。唯一開關是根目錄的公開、非敏感檔案 `ai-search.config.json`：
+可選網站功能統一由根目錄的公開、非敏感檔案 `config.json` 設定。它只能包含已公開的開關；未知欄位會被拒絕，且絕不能包含 endpoint、憑證、權杖或個人資料。
 
 ```json
 {
-  "enabled": false
+  "aiSearch": {
+    "enabled": false
+  },
+  "performance": {
+    "prefetchLinks": false
+  }
 }
 ```
 
-預設 `false`。要使用它，將 `enabled` 改為 `true` 並重新啟動 `pnpm docs:dev`。問題和選取的公開頁面摘錄會傳送給設定的模型服務；私有區塊、HTML 註解、草稿和非公開頁面不會進入模型輸入。介面只接受來自回環位址且 `Host`/`Origin` 與本站同源相符的用戶端；介面提供取消按鈕，錯誤和逾時會明確顯示。
+AI 搜尋是可選的本機開發功能，不會進入靜態生產網站。它預設關閉；要使用它，將 `aiSearch.enabled` 改為 `true` 並重新啟動 `pnpm docs:dev`。問題和選取的公開頁面摘錄會傳送給設定的模型服務；私有區塊、HTML 註解、草稿和非公開頁面不會進入模型輸入。端點只接受來自回環位址且 `Host`/`Origin` 與本站同源相符的用戶端；介面提供取消按鈕，錯誤和逾時會明確顯示。
+
+`performance.prefetchLinks` 控制 VitePress 的連結預取。預設 `false` 避免首屏預取其他語言版本的頁面，從而減少初始請求；設為 `true` 可能加快後續導覽，但會增加首屏請求，請按需取捨。
 
 適配器直接呼叫 OpenAI 相容的模型 API。無論檔案內容為何，`pnpm docs:build` 都把開關解析為 `false`，因此生產套件不含 AI 按鈕、endpoint、適配器、設定物件或憑證。GitHub Pages 是純靜態託管；公開可用的 AI 必須另建有伺服器端憑證保護的後端。開發伺服器只提供 `docs/`、`docs/public/` 和 `node_modules/`，建置會拒絕可發佈路徑中的私有檔案或符號連結/junction。這些是縱深防禦，不構成對已遭入侵本機帳戶或檔案系統的絕對保證。
 
-### 本機模型設定
+### 私有工具設定
 
-本機模型適配器預設讀取被 Git 忽略的 `tools/model-config.yaml`，或透過 `AI_MODEL_CONFIG` 指定儲存庫外或受允許的已忽略位置的安全私有 YAML/JSON 檔案。設定格式為 YAML；`.json` 檔案依 JSON 解析。下面的佔位範例是有效的設定結構，不包含真實 endpoint 或憑證：
+`tools/config.yaml` 是本機工具唯一的預設私有設定。它被 Git 忽略、僅本機存在，絕不會被服務、打包或發佈。它同時保存模型目錄和工具預設值：預設服務提供者、預設模型、請求逾時和預設輸出上限。儲存庫內沒有第二份逐工具設定檔。
 
 ```yaml
+# Default provider key from `providers` (optional; otherwise the built-in default when present, then the first).
+provider: local
+# Default model id (or display name) within that provider (optional; otherwise the first model).
+model: example-model
+# Model request timeout in milliseconds (optional; default 300000).
+timeoutMs: 300000
+# Default max output tokens per request (optional; default 16384).
+maxOutputTokens: 16384
+
 providers:
   local:
     baseUrl: "https://model.example/v1"
     api: openai-completions
     apiKey: "<your-api-key>"
     models:
-      - id: "<model-id>"
-        name: "<model-name>"
+      - id: example-model
+        name: Example Model
         contextWindow: 32768
         maxTokens: 4096
         input: [text]
+        # optional: reasoningEffort: none|low|medium|high|max|null (also allowed on the provider)
 ```
 
-`api` 必須為 `openai-completions`（也接受 `openai-compatible`）。`baseUrl` 必須使用 HTTPS（本機回環位址可使用 HTTP），且不得包含憑證、查詢參數或片段。每個模型的 `id` 必須唯一；`contextWindow` 與 `maxTokens` 為正整數，且 `maxTokens` 不得大於 `contextWindow`；`input` 若存在必須是非空字串陣列。`AI_MODEL`、`AI_MODEL_PROVIDER` 選擇已設定的模型和服務提供者；`AI_REQUEST_TIMEOUT_MS` 預設 `300000` 毫秒，應低於瀏覽器 15 分鐘硬性上限。設定缺失、無法讀取或無效時直接失敗，不會回退到環境變數金鑰或 OMP。
+`provider` 與 `model` 選擇預設值；省略時，適配器優先使用已設定的內建預設服務提供者，其次使用第一個服務提供者，並使用該服務提供者的第一個模型。`timeoutMs` 與 `maxOutputTokens` 是可選正整數，預設值如上。每次執行可用環境變數覆寫：`AI_MODEL_CONFIG` 指向另一份私有 YAML/JSON 檔案，`AI_MODEL` 與 `AI_MODEL_PROVIDER` 選擇模型和服務提供者，`AI_REQUEST_TIMEOUT_MS` 設定逾時。設定缺失、無法讀取或無效時直接失敗，不會使用偽造備援。
 
-儲存庫內只接受已忽略的私有位置：`tools/model-config.yaml`（也接受 `.yml` 或 `.json`）、根目錄 `.env`/`.env.*`（`.env.example` 除外）、`tools/.env*`，以及 `tools/` 下符合已忽略金鑰模式的檔案。`docs/` 等可發佈或未被忽略的路徑會被拒絕；不得提交私有設定，也不得把金鑰放入受版本控制或可發佈的路徑。
+`providers` 把服務提供者名稱對應到其設定。`api` 必須為 `openai-completions` 或 `openai-compatible`。`baseUrl` 必須使用 HTTPS（本機回環位址可使用 HTTP），且不得包含憑證、查詢參數或片段。每個模型的 `id` 必須唯一；`contextWindow` 與 `maxTokens` 若存在必須為正整數，且 `maxTokens` 不得大於 `contextWindow`；`input` 若存在必須是非空字串陣列。`reasoningEffort` 如使用，只能是 `none`、`low`、`medium`、`high`、`max` 或 null。
 
-**私鑰規則：**`tools/model-config.yaml` 是使用者的真實敏感檔案。僅本機模型適配器可在執行階段於本機讀取它用於認證。人和 agent 不得讀取、列印、複製、移動或提交它，也不得把其內容貼到文件、原始碼、Actions 或 AI 對話中；適配器不得洩露其內容。
+**私鑰規則：**`tools/config.yaml` 以及 `AI_MODEL_CONFIG` 指定的檔案是使用者的真實敏感設定。僅本機模型適配器可在執行階段於本機讀取它們用於認證。人和 agent 不得讀取、列印、複製、移動或提交它們，也不得把其內容貼到文件、原始碼、Actions 或 AI 對話中；適配器不得洩露它們。備用檔案必須位於儲存庫外或已忽略的私有位置，絕不能放在 `docs/` 或其他可發佈路徑。絕不能用佔位值覆寫既有的私有設定檔。
 
 ## 本機開發
 
-需要 Node.js 和 pnpm（版本由 `packageManager` 固定）。安裝、開發、建置和預覽：
+需要 Node.js 和 pnpm（pnpm 版本由 `packageManager` 固定）。安裝、開發、建置和預覽：
 
 ```sh
 pnpm install --frozen-lockfile
@@ -191,14 +212,18 @@ pnpm docs:preview
 
 | 指令 | 用途 |
 | --- | --- |
-| `pnpm check:bilingual` | 檢查三個文件目錄、根目錄三份 README、頁面結構和連結以及可見介面文案，並做模型語意審閱。 |
-| `pnpm test:bilingual` | 翻譯、三語檢查、隱私、路徑和寫入安全的行為測試。 |
-| `pnpm test:tools` | AI 適配器與 AI 搜尋的行為測試。 |
+| `pnpm check:multilingual:structure` | 只做第一階段確定性檢查：完整的語言涵蓋、頁面與 README 結構、程式碼、數學、Mermaid、連結、繁體中文轉換和介面文案。不需要模型設定或憑證。 |
+| `pnpm check:multilingual` | 兩個階段：第一階段必須完整通過，第二階段才可呼叫模型做語意審閱。第一階段有任何錯誤都代表零次模型請求。 |
+| `pnpm test:multilingual` | 翻譯、兩階段多語言檢查、隱私、路徑和寫入安全的行為測試。 |
 | `pnpm docs:build` | 產生生產網站 `docs/.vitepress/dist`。 |
 
-`pnpm check:bilingual` 會把配對頁面內容和介面文案傳送給設定的模型，應人工審閱其結論，不能當作翻譯品質的證明。GitHub Actions 沒有模型憑證，因此該檢查只在本地或主驗證階段執行，不包含在部署 workflow 中。
+第一階段枚舉三個文件目錄、根目錄三份 README、其他受支援的根目錄中文文件，以及從 `en-us.ts`、`zh-cn.ts`、`zh-tw.ts` 載入的可見介面文案。它檢查路徑、標題層級、段落、清單和引用結構、表格、程式碼圍欄、數學、Mermaid 結構、連結目標與語言前綴、未轉換的繁體中文、導覽、側邊欄、frontmatter、受保護內容和設定，並收集全部錯誤而不是在第一個錯誤處停止。檔案無法讀取、隱私失敗和設定失敗同樣計為第一階段錯誤。`docs/index.md` 是根入口，不參與配對。
 
-人工驗收至少涵蓋：三個版本的首頁、導覽、側邊欄和筆記條目；根路徑針對繁體中文、其他中文、英文及其他語言的自動選擇；停用 JavaScript 或瀏覽器未提供語言時根路徑回退到英文；明確語言路徑和導覽選單中的語言切換保持生效；桌面與手機寬度；淺色和深色主題；數學公式與 Mermaid；字型載入；以及無 AI、無本站以外執行階段資源請求的生產建置。
+只有第一階段沒有任何錯誤時才執行第二階段。它把清理後的配對頁面內容和介面文案傳送給設定的模型，逐頁面做語意審閱；語意失敗會以非零結果傳回。模型輸出只是審閱輔助，不能當作翻譯品質的證明；請閱讀結論，不要把語意失敗當成通過。完整指令需要可用的私有模型設定，而 `pnpm check:multilingual:structure` 既不需要憑證，也不需要網路。
+
+人工驗收至少涵蓋：三個版本的首頁、導覽、側邊欄和筆記條目；根路徑針對繁體中文、其他中文、英文及其他語言的自動選擇；停用 JavaScript 或瀏覽器未提供語言時根路徑回退到英文；明確語言路徑和導覽選單中的語言切換保持生效；桌面與手機寬度；淺色和深色主題；數學公式與 Mermaid；字型載入；以及無 AI、無本站以外執行階段請求的生產建置。
+
+冷快取驗收是目標而非保證：在訪客網路、GitHub Pages 和瀏覽器條件允許時，全新、無快取的瀏覽器首次載入每個版本的資源應低於 1 秒。部署後必須等 CI/CD workflow 完成，再用全新的瀏覽器設定、空快取（或停用快取）測試線上網站，並報告真實測量結果和條件。不得偽造、挑選或隱藏耗時資料。
 
 - 只報告實際執行過的指令、真實輸出和涵蓋範圍；未執行的檢查不得聲稱通過。
 - 不得偽造內容、資料、截圖或測試結果，也不得隱藏失敗、警告或已知限制。
@@ -209,19 +234,19 @@ pnpm docs:preview
 
 公開儲存庫中不得出現憑證、私有設定、草稿或未公開的個人資料。
 
-- `tools/model-config.yaml` 必須保持被忽略、僅本機存在；僅本機模型適配器在執行階段為認證讀取，人和 agent 不得讀取、列印、複製或提交它。
+- 根目錄 `config.json` 只能包含公開、非敏感開關。不得加入 endpoint、金鑰、權杖或私有服務提供者設定；未知欄位會被拒絕。
+- `tools/config.yaml` 必須保持被忽略、僅本機存在。僅本機模型適配器在執行階段為認證讀取它；人和 agent 不得讀取、列印、複製或提交它。
 - 私有區塊標記 `<!-- private:start -->` 與 `<!-- private:end -->` 只控制模型輸入，不改變檔案的可發佈性；標記內的文字仍可能透過 Git 或 VitePress 公開。
 - HTML 註解和私有區塊會從模型輸入中移除；不要用它們存放金鑰，也不要把金鑰放進任何 Markdown。
-- `ai-search.config.json` 只能包含公開布林開關，不得寫入 endpoint、金鑰或其他敏感設定。
 - 翻譯工具在寫入整批檔案前驗證結果並檢查衝突；衝突檢查不能代替備份。避免同時編輯目標檔案，`translate:docs:force` 會覆寫既有英文和繁體中文頁面。
-- 建置會拒絕可發佈路徑中的私有檔案和符號連結/junction；開發伺服器依白名單提供檔案。發現異常應修復原因，不要關閉保護。
+- 建置會拒絕可發佈路徑中的私有檔案和符號連結/junction；開發伺服器只依白名單提供檔案。發現異常應修復原因，不要關閉保護。
 
 ## 協作與檔案歸屬
 
 本儲存庫可能在共享工作樹中由多個 agent 協作。每個獨立功能單獨指派一個子 agent，並給予明確的檔案清單和驗收標準；不要把同一檔案同時交給多個 agent。
 
 - 子 agent 只改自己負責的檔案；需要共享檔案時先問其 owner 或主 agent，不得跨範圍修改。
-- 不要 reset、checkout 或覆寫使用者及其他 agent 的改動；不要刪除不認識的使用者資料。`tools/model-config.yaml` 必須保持本機、被忽略；僅本機模型適配器在執行階段讀取，人和 agent 不得讀取、列印、複製或提交它。
+- 不要 reset、checkout 或覆寫使用者及其他 agent 的改動；不要刪除不認識的使用者資料。`tools/config.yaml` 必須保持本機、被忽略；僅本機模型適配器在執行階段讀取，人和 agent 不得讀取、列印、複製或提交它。
 - 子 agent 不在中途執行 build、test、lint 或 format；所有改動落地後由主 agent 統一驗收並報告真實結果。
 - 功能拆分為可獨立驗收的小塊；新功能要有對應行為測試，測試放在 `tools/` 並與實作同目錄。
 - 結構和指令變化時同步更新三份 README；本 README 是唯一開發入口，不要建立平行的開發說明。
@@ -232,6 +257,7 @@ pnpm docs:preview
 推送到 `main` 會觸發 `.github/workflows/static.yml`，安裝相依套件、建置網站並把 `docs/.vitepress/dist` 部署到 GitHub Pages。儲存庫 Pages 的發佈來源必須設為 **GitHub Actions**。
 
 - workflow 只執行安裝、建置和部署，不執行模型檢查，也不持有任何模型憑證。
-- 生產建置始終關閉 AI 搜尋，即使 `ai-search.config.json` 在本機為 `true`。
+- 生產建置始終關閉 AI 搜尋，即使 `config.json` 在本機為 `true`。
 - 發佈前確認檢查通過、工作樹中沒有私有檔案、沒有未審閱的翻譯覆寫。
-- 部署後抽查三個版本的頁面、導覽、字型、公式和圖表；網站不應請求非本站執行階段資源。
+- 部署後等 workflow 完成，再抽查三個版本的頁面、導覽、字型、公式和圖表；網站不應請求非本站執行階段資源。
+- 然後用全新的瀏覽器設定和空快取執行冷快取測試，並報告真實結果；不得承諾或偽造固定載入時間。

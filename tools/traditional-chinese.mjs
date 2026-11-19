@@ -1,13 +1,21 @@
 import { Converter } from 'opencc-js'
-import { traditionalDirName } from './document-mapping.mjs'
-import { convertFrontmatter } from './frontmatter-translate.mjs'
-import { maskMarkdown, restoreMaskedMarkdown } from './markdown-protect.mjs'
+import {
+  collectUnsupported,
+  encodeValue,
+  hasCjk,
+  isPathLikeValue,
+  localizeInternalHref,
+  parseFrontmatterScalars,
+  traditionalDirName
+} from './document-model.mjs'
 import {
   assertNoPrivateContent,
+  assertSafeGeneratedMarkup,
+  maskMarkdown,
+  restoreMaskedMarkdown,
   sanitizeMarkdownForModel,
   splitMarkdownDocument
-} from './markdown-privacy.mjs'
-import { assertSafeGeneratedMarkup } from './markdown-security.mjs'
+} from './markdown-safety.mjs'
 import { convertMermaidBlocks, restoreMermaidBlocks } from './mermaid-translate.mjs'
 import { projectSemanticText } from './semantic-safe.mjs'
 
@@ -126,4 +134,50 @@ export async function traditionalTextIssues(targetText, options = {}) {
   return issue
     ? [`${file}: 繁中页面仍含未转换的简体内容「${issue.simplified}」，应为「${issue.traditional}」`]
     : []
+}
+
+export function convertFrontmatter(frontmatter, options = {}) {
+  if (typeof frontmatter !== 'string') throw new TypeError('frontmatter 必须是字符串')
+  const convertText = options.convertText
+  if (typeof convertText !== 'function') {
+    throw new TypeError('convertFrontmatter 需要 convertText')
+  }
+  const targetLocale = options.targetLocale ?? traditionalDirName
+
+  const unsupported = collectUnsupported(frontmatter)
+  if (unsupported.length > 0) throw new Error(unsupported.join('；'))
+
+  const { lines, records } = parseFrontmatterScalars(frontmatter)
+  const parseErrors = records.filter((record) => record.error)
+  if (parseErrors.length > 0) {
+    throw new Error(parseErrors.map((record) => `第 ${record.line} 行：${record.error}`).join('；'))
+  }
+
+  const byLine = new Map()
+  for (const record of records) {
+    if (record.localize) {
+      byLine.set(record.line, {
+        record,
+        value: localizeInternalHref(record.value, targetLocale)
+      })
+      continue
+    }
+    if (!hasCjk(record.value) || isPathLikeValue(record.value)) continue
+    const converted = convertText(record.value)
+    if (typeof converted !== 'string' || converted.trim() === '') {
+      throw new Error(`第 ${record.line + 1} 行的前置元数据转换结果为空`)
+    }
+    if (converted.includes('<!--') || /private\s*:/.test(converted)) {
+      throw new Error('前置元数据转换结果包含私有内容标记，已拒绝写入')
+    }
+    byLine.set(record.line, { record, value: converted })
+  }
+
+  return lines.map((line, index) => {
+    const replacement = byLine.get(index)
+    if (!replacement) return line
+    const { record, value } = replacement
+    const encoded = encodeValue(value, record.quote)
+    return `${record.content.slice(0, record.valueStart)}${encoded}${record.content.slice(record.valueEnd)}${record.ending}`
+  }).join('')
 }

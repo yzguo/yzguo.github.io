@@ -1,7 +1,7 @@
 import test, { after, before } from 'node:test'
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { link, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { Readable } from 'node:stream'
@@ -25,16 +25,16 @@ import {
     tokenize,
 } from './ai-search.mjs'
 import {
-    AI_SEARCH_CONFIG_PATH,
-    DEFAULT_AI_SEARCH_CONFIG,
+    SITE_CONFIG_PATH,
+    DEFAULT_SITE_CONFIG,
     DEFAULT_FILE_SYSTEM_OPS,
     assertPrivateModelConfigPlacement,
-    parseAiSearchConfig,
+    parseSiteConfig,
     pathKey,
-    readAiSearchConfig,
+    readSiteConfig,
     resolveAiSearchEnabled,
     scanPublishableResources,
-} from './ai-search-config.mjs'
+} from './site-config.mjs'
 
 let docsRoot
 
@@ -392,6 +392,7 @@ function createService(options = {}) {
     return createAiSearchService({
         docsRoot,
         enabled: true,
+        resolveModelTimeout: () => MODEL_TIMEOUT_MS,
         ...options,
     })
 }
@@ -847,6 +848,227 @@ test('indexes only public pages inside the locale directories', async () => {
     assert.match(indexedText, /visible-between-fences/)
     assert.match(indexedText, /visible-after-fence/)
     assert.match(indexedText, /unclosed-fence-before/)
+})
+
+test('never indexes a Markdown hardlink to the private tool configuration', async (t) => {
+    const root = await mkdtemp(path.join(tmpdir(), 'ai-index-hardlink-'))
+    const previous = process.env.AI_MODEL_CONFIG
+    t.after(async () => {
+        if (previous === undefined) delete process.env.AI_MODEL_CONFIG
+        else process.env.AI_MODEL_CONFIG = previous
+        await rm(root, { recursive: true, force: true })
+    })
+
+    const docs = path.join(root, 'docs')
+    const en = path.join(docs, 'en')
+    const privateDir = path.join(root, 'private')
+    await mkdir(en, { recursive: true })
+    await mkdir(privateDir, { recursive: true })
+
+    const normalMarker = 'hardlinknormalmarkerword'
+    const secretMarker = 'hardlinkprivatemarkerword'
+    const replacementMarker = 'replacementprivatemarkerword'
+    const secret = 'sk-test-hardlink-sentinel'
+    await writeFile(
+        path.join(en, 'normal.md'),
+        `# Normal\n\n${normalMarker} pendulum period depends on length.\n`,
+        'utf8'
+    )
+
+    const configText = (marker) => [
+        `# ${marker}`,
+        'timeoutMs: 25',
+        'providers:',
+        '  isolated:',
+        '    baseUrl: "https://example.invalid/v1"',
+        '    api: openai-completions',
+        `    apiKey: "${secret}"`,
+        '    models:',
+        '      - id: "isolated-model"',
+        '        contextWindow: 4096',
+        '        maxTokens: 1024',
+    ].join('\n')
+
+    const configPath = path.join(privateDir, 'config.yaml')
+    await writeFile(configPath, configText(secretMarker), 'utf8')
+    const leakedPath = path.join(en, 'leaked.md')
+    try {
+        await link(configPath, leakedPath)
+    } catch (error) {
+        if (
+            error?.code === 'EPERM' ||
+            error?.code === 'EACCES' ||
+            error?.code === 'EXDEV' ||
+            error?.code === 'ENOSYS' ||
+            error?.code === 'EMLINK'
+        ) {
+            t.skip('hardlinks are unavailable on this filesystem')
+            return
+        }
+        throw error
+    }
+    process.env.AI_MODEL_CONFIG = configPath
+
+    const indexedText = (index) =>
+        index.chunks
+            .map((chunk) => `${chunk.title}\n${chunk.heading}\n${chunk.text}`)
+            .join('\n')
+
+    const observedPrivateIdentities = new Set()
+    const first = await buildDocsIndex(docs, { observedPrivateIdentities })
+    const firstText = indexedText(first)
+    assert.match(firstText, new RegExp(normalMarker))
+    assert.doesNotMatch(firstText, new RegExp(secretMarker))
+    assert.ok(!firstText.includes(secret))
+
+    // Consumer-visible: a query for the private body must never reach a model.
+    const prompts = []
+    const service = createAiSearchService({
+        docsRoot: docs,
+        enabled: true,
+        requestModel: async ({ prompt }) => {
+            prompts.push(prompt)
+            return 'A useful answer'
+        },
+        resolveModelTimeout: () => 12_345,
+    })
+    const secretHit = await service.search(secretMarker, 'en')
+    assert.equal(secretHit.status, 'no_results')
+    assert.equal(prompts.length, 0)
+
+    const normalHit = await service.search(normalMarker, 'en')
+    assert.equal(normalHit.status, 'ok')
+    assert.equal(prompts.length, 1)
+    assert.match(prompts[0], new RegExp(normalMarker))
+    assert.ok(!prompts[0].includes(secretMarker))
+    assert.ok(!prompts[0].includes(secret))
+
+    // Replacing the private config at runtime creates a new inode while the
+    // old inode stays hardlinked into docs. The service's persistent identity
+    // set must keep excluding the old hardlink after an index rebuild.
+    await rm(configPath)
+    await writeFile(configPath, configText(replacementMarker), 'utf8')
+    service.invalidate()
+
+    const replacedSecretHit = await service.search(secretMarker, 'en')
+    assert.equal(replacedSecretHit.status, 'no_results')
+    assert.equal(prompts.length, 1)
+
+    const replacedNormalHit = await service.search(normalMarker, 'en')
+    assert.equal(replacedNormalHit.status, 'ok')
+    assert.equal(prompts.length, 2)
+    assert.match(prompts[1], new RegExp(normalMarker))
+    assert.ok(!prompts[1].includes(secretMarker))
+    assert.ok(!prompts[1].includes(replacementMarker))
+    assert.ok(!prompts[1].includes(secret))
+})
+
+test('fails the index closed when private config identity cannot be resolved', async (t) => {
+    const root = await mkdtemp(
+        path.join(tmpdir(), 'ai-index-fail-closed-')
+    )
+    const previous = process.env.AI_MODEL_CONFIG
+    t.after(async () => {
+        if (previous === undefined) delete process.env.AI_MODEL_CONFIG
+        else process.env.AI_MODEL_CONFIG = previous
+        await rm(root, { recursive: true, force: true })
+    })
+
+    const docs = path.join(root, 'docs')
+    const en = path.join(docs, 'en')
+    const privateDir = path.join(root, 'private')
+    await mkdir(en, { recursive: true })
+    await mkdir(privateDir, { recursive: true })
+    await writeFile(
+        path.join(en, 'normal.md'),
+        '# Normal\n\nfailclosednormalmarkerword pendulum period.\n',
+        'utf8'
+    )
+    const configPath = path.join(privateDir, 'config.yaml')
+    await writeFile(configPath, 'timeoutMs: 25\n', 'utf8')
+    process.env.AI_MODEL_CONFIG = configPath
+
+    const sentinel = 'PRIVATE_IDENTITY_ERROR_SENTINEL'
+    const fakeFs = {
+        ...DEFAULT_FILE_SYSTEM_OPS,
+        statSync(value) {
+            if (pathKey(value) === pathKey(configPath)) {
+                throw Object.assign(new Error(sentinel), {
+                    code: 'EACCES',
+                })
+            }
+            return DEFAULT_FILE_SYSTEM_OPS.statSync(value)
+        },
+    }
+
+    await assert.rejects(
+        buildDocsIndex(docs, { fs: fakeFs }),
+        (error) => {
+            assert.match(error.message, /拒绝建立索引/)
+            assert.ok(!error.message.includes(sentinel))
+            assert.ok(!error.message.includes(configPath))
+            assert.ok(!error.message.includes('EACCES'))
+            return true
+        }
+    )
+})
+
+test('skips symlinked Markdown and directory escapes during indexing', async (t) => {
+    const root = await mkdtemp(path.join(tmpdir(), 'ai-index-symlink-'))
+    t.after(() => rm(root, { recursive: true, force: true }))
+
+    const docs = path.join(root, 'docs')
+    const en = path.join(docs, 'en')
+    const outsideDir = path.join(root, 'outside')
+    await mkdir(en, { recursive: true })
+    await mkdir(outsideDir, { recursive: true })
+
+    const normalMarker = 'symlinknormalmarkerword'
+    const fileEscapeMarker = 'symlinkfileescapemarkerword'
+    const directoryEscapeMarker = 'symlinkdirectoryescapemarkerword'
+    await writeFile(
+        path.join(en, 'normal.md'),
+        `# Normal\n\n${normalMarker} pendulum period depends on length.\n`,
+        'utf8'
+    )
+    const outsideFile = path.join(root, 'outside.md')
+    await writeFile(
+        outsideFile,
+        `# Outside\n\n${fileEscapeMarker} escaped content.\n`,
+        'utf8'
+    )
+    await writeFile(
+        path.join(outsideDir, 'escaped.md'),
+        `# Outside\n\n${directoryEscapeMarker} escaped content.\n`,
+        'utf8'
+    )
+
+    try {
+        await symlink(outsideFile, path.join(en, 'linked.md'), 'file')
+        await symlink(
+            outsideDir,
+            path.join(en, 'linked-dir'),
+            process.platform === 'win32' ? 'junction' : 'dir'
+        )
+    } catch (error) {
+        if (
+            error?.code === 'EPERM' ||
+            error?.code === 'EACCES' ||
+            error?.code === 'ENOSYS'
+        ) {
+            t.skip('symlinks are unavailable on this system')
+            return
+        }
+        throw error
+    }
+
+    const index = await buildDocsIndex(docs)
+    const indexedText = index.chunks
+        .map((chunk) => `${chunk.title}\n${chunk.heading}\n${chunk.text}`)
+        .join('\n')
+    assert.match(indexedText, new RegExp(normalMarker))
+    assert.doesNotMatch(indexedText, new RegExp(fileEscapeMarker))
+    assert.doesNotMatch(indexedText, new RegExp(directoryEscapeMarker))
 })
 
 test('retrieves relevant sections without mixing languages', async () => {
@@ -1531,12 +1753,17 @@ test('validates Host headers and source paths', () => {
 
 test('refuses the AI endpoint without touching a model when the switch is off', async () => {
     let calls = 0
+    let resolved = 0
     const service = createAiSearchService({
         docsRoot: path.join(docsRoot, 'missing-docs-root'),
         enabled: false,
         requestModel: async () => {
             calls += 1
             return 'should never be called'
+        },
+        resolveModelTimeout: async () => {
+            resolved += 1
+            throw new Error('timeout configuration must not be read')
         },
     })
 
@@ -1552,6 +1779,7 @@ test('refuses the AI endpoint without touching a model when the switch is off', 
     assert.equal(response.json.ok, false)
     assert.equal(response.json.code, 'ai_disabled')
     assert.equal(calls, 0)
+    assert.equal(resolved, 0)
     assert.doesNotMatch(
         response.rawBody,
         /pendulum|private|api[_-]?key|baseUrl|secret/i
@@ -1561,7 +1789,7 @@ test('refuses the AI endpoint without touching a model when the switch is off', 
 test('attaches a disabled endpoint and file guard without watching docs', async () => {
     const watcherEvents = []
     const handlers = []
-    const fakeKey = path.join(docsRoot, 'fake-model-config.yaml')
+    const fakeKey = path.join(docsRoot, 'fake-config.yaml')
     await writeFile(fakeKey, 'FAKE_KEY_SENTINEL', 'utf8')
     const server = {
         config: { root: docsRoot },
@@ -1583,6 +1811,10 @@ test('attaches a disabled endpoint and file guard without watching docs', async 
         aiModelConfig: null,
         repoRoot: docsRoot,
         modelConfigPath: fakeKey,
+        requestModel: async () => 'should never be called',
+        resolveModelTimeout: async () => {
+            throw new Error('timeout configuration must not be read')
+        },
     })
     assert.equal(service.enabled, false)
     assert.equal(handlers.length, 2)
@@ -1612,9 +1844,10 @@ test('file access guard blocks private files, encodings, and virtual symlink esc
             mkdir(privateDir, { recursive: true }),
         ])
 
-        const modelConfigPath = path.join(tools, 'model-config.yaml')
+        const modelConfigPath = path.join(tools, 'config.yaml')
         const envModelConfig = path.join(privateDir, 'private-model.json')
         const publicFile = path.join(publicDir, 'ok.txt')
+        const publicConfig = path.join(publicDir, 'config.json')
         const docFile = path.join(docs, 'page.md')
         const dependencyFile = path.join(nodeModules, 'dep.js')
         const outsideFile = path.join(repoRoot, 'README.md')
@@ -1624,6 +1857,7 @@ test('file access guard blocks private files, encodings, and virtual symlink esc
             writeFile(modelConfigPath, 'FAKE_KEY_SENTINEL', 'utf8'),
             writeFile(envModelConfig, 'FAKE_CONFIG_SENTINEL', 'utf8'),
             writeFile(publicFile, 'public', 'utf8'),
+            writeFile(publicConfig, '{"aiSearch":{"enabled":false}}', 'utf8'),
             writeFile(docFile, '# page', 'utf8'),
             writeFile(dependencyFile, 'export default 1', 'utf8'),
             writeFile(outsideFile, 'outside', 'utf8'),
@@ -1669,7 +1903,7 @@ test('file access guard blocks private files, encodings, and virtual symlink esc
             fs: fakeFs,
         })
 
-        for (const file of [docFile, publicFile, dependencyFile]) {
+        for (const file of [docFile, publicFile, publicConfig, dependencyFile]) {
             const result = await fileAccess(guard, fsUrl(file))
             assert.equal(result.nextCalled, true)
             assert.equal(result.status, 200)
@@ -1714,6 +1948,9 @@ test('file access guard blocks private files, encodings, and virtual symlink esc
             '/.env',
             '/.env.local',
             '/.env.',
+            '/config.yaml',
+            '/config.yml',
+            '/config.yaml.',
             '/model-config.yaml',
             '/model-config.json',
             '/model-config.yaml.',
@@ -1736,7 +1973,7 @@ test('file access guard blocks private files, encodings, and virtual symlink esc
             assert.equal(result.body, 'Forbidden')
             assert.doesNotMatch(
                 result.body,
-                /FAKE_KEY_SENTINEL|FAKE_CONFIG_SENTINEL|api-key|model-config|[A-Z]:\\/i
+                /FAKE_KEY_SENTINEL|FAKE_CONFIG_SENTINEL|api-key|model-config|config\.ya?ml|[A-Z]:\\/i
             )
         }
 
@@ -1804,7 +2041,7 @@ test('file access guard refreshes protected identities per request', async () =>
             mkdir(tools, { recursive: true }),
         ])
 
-        const key = path.join(tools, 'model-config.yaml')
+        const key = path.join(tools, 'config.yaml')
         const publicFile = path.join(publicDir, 'ok.txt')
         const firstLink = path.join(publicDir, 'hard-created.txt')
         const secondLink = path.join(publicDir, 'hard-replaced.txt')
@@ -1921,11 +2158,16 @@ test('publish scan rejects private files and virtual symlink escapes', async () 
             mkdir(privateDir, { recursive: true }),
         ])
 
-        const modelConfigPath = path.join(tools, 'model-config.yaml')
+        const modelConfigPath = path.join(tools, 'config.yaml')
         const envModelConfig = path.join(privateDir, 'private-model.json')
         await Promise.all([
             writeFile(path.join(docs, 'index.md'), '# Home', 'utf8'),
             writeFile(path.join(publicDir, 'ok.css'), 'body{}', 'utf8'),
+            writeFile(
+                path.join(publicDir, 'config.json'),
+                '{"aiSearch":{"enabled":false}}',
+                'utf8'
+            ),
             writeFile(modelConfigPath, 'FAKE_KEY_SENTINEL', 'utf8'),
             writeFile(envModelConfig, 'FAKE_CONFIG_SENTINEL', 'utf8'),
         ])
@@ -1942,6 +2184,8 @@ test('publish scan rejects private files and virtual symlink escapes', async () 
         for (const name of [
             '.env',
             'leaked.key',
+            'config.yaml',
+            'config.yml',
             'model-config.yaml',
             'model-config.json',
             'api-key.txt',
@@ -1983,7 +2227,7 @@ test('publish scan rejects private files and virtual symlink escapes', async () 
             (error) => {
                 assert.doesNotMatch(
                     error.message,
-                    /FAKE_KEY_SENTINEL|FAKE_CONFIG_SENTINEL|api-key|model-config|[A-Z]:\\/i
+                    /FAKE_KEY_SENTINEL|FAKE_CONFIG_SENTINEL|api-key|model-config|config\.ya?ml|[A-Z]:\\/i
                 )
                 assert.match(
                     error.message,
@@ -2070,7 +2314,7 @@ test('publish scan rejects private files and virtual symlink escapes', async () 
     }
 })
 
-test('private model configuration uses only ignored repo paths or outside repo', async () => {
+test('private tool configuration uses only ignored repo paths or outside repo', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'ai-config-placement-'))
     try {
         const repoRoot = path.join(root, 'repo')
@@ -2087,9 +2331,7 @@ test('private model configuration uses only ignored repo paths or outside repo',
             baseDirectory: root,
         }
         const allowed = [
-            path.join(repoRoot, 'tools', 'model-config.yaml'),
-            path.join(repoRoot, 'tools', 'model-config.yml'),
-            path.join(repoRoot, 'tools', 'model-config.json'),
+            path.join(repoRoot, 'tools', 'config.yaml'),
             path.join(repoRoot, 'tools', 'local.key'),
             path.join(repoRoot, 'tools', 'local.pem'),
             path.join(repoRoot, 'tools', 'model.secret.json'),
@@ -2115,6 +2357,11 @@ test('private model configuration uses only ignored repo paths or outside repo',
             path.join(repoRoot, 'config', 'foo.yaml'),
             path.join(repoRoot, 'tools', 'nested', 'foo.key'),
             path.join(repoRoot, 'tools', 'foo.json'),
+            path.join(repoRoot, 'tools', 'config.yml'),
+            path.join(repoRoot, 'tools', 'config.json'),
+            path.join(repoRoot, 'tools', 'model-config.yaml'),
+            path.join(repoRoot, 'tools', 'model-config.yml'),
+            path.join(repoRoot, 'tools', 'model-config.json'),
             path.join(repoRoot, 'tools', 'api-key.txt'),
             path.join(repoRoot, 'tools', 'api-key.yaml'),
             path.join(repoRoot, 'tools', 'model-config.txt'),
@@ -2157,7 +2404,7 @@ test('private model configuration uses only ignored repo paths or outside repo',
             /must not be inside a served or publishable path/
         )
 
-        const repoLink = path.join(repoRoot, 'tools', 'model-config.yaml')
+        const repoLink = path.join(repoRoot, 'tools', 'config.yaml')
         const repoLinkFs = {
             ...DEFAULT_FILE_SYSTEM_OPS,
             realpathSync(value) {
@@ -2181,41 +2428,110 @@ test('private model configuration uses only ignored repo paths or outside repo',
     }
 })
 
-test('exposes one boolean switch and always disables production builds', async () => {
-    assert.deepEqual(parseAiSearchConfig({ enabled: true }), { enabled: true })
-    assert.deepEqual(parseAiSearchConfig({ enabled: false }), {
-        enabled: false,
+test('exposes nested public switches and always disables production builds', async () => {
+    const enabledConfig = parseSiteConfig({
+        aiSearch: { enabled: true },
+        performance: { prefetchLinks: true },
     })
-    assert.equal(resolveAiSearchEnabled('serve', { enabled: true }), true)
-    assert.equal(resolveAiSearchEnabled('serve', { enabled: false }), false)
-    assert.equal(resolveAiSearchEnabled('build', { enabled: true }), false)
-    assert.equal(resolveAiSearchEnabled('build', { enabled: false }), false)
+    assert.deepEqual(enabledConfig, {
+        aiSearch: { enabled: true },
+        performance: { prefetchLinks: true },
+    })
+    assert.ok(Object.isFrozen(enabledConfig))
+    assert.ok(Object.isFrozen(enabledConfig.aiSearch))
+    assert.ok(Object.isFrozen(enabledConfig.performance))
 
-    assert.equal(DEFAULT_AI_SEARCH_CONFIG.enabled, false)
+    const disabledConfig = parseSiteConfig({
+        aiSearch: { enabled: false },
+        performance: { prefetchLinks: false },
+    })
+    assert.deepEqual(disabledConfig, {
+        aiSearch: { enabled: false },
+        performance: { prefetchLinks: false },
+    })
+    assert.ok(Object.isFrozen(disabledConfig))
+    assert.ok(Object.isFrozen(disabledConfig.aiSearch))
+    assert.ok(Object.isFrozen(disabledConfig.performance))
+
+    const performanceOnly = parseSiteConfig({
+        aiSearch: { enabled: false },
+        performance: { prefetchLinks: true },
+    })
+
+    assert.equal(resolveAiSearchEnabled('serve', enabledConfig), true)
+    assert.equal(resolveAiSearchEnabled('serve', disabledConfig), false)
+    assert.equal(resolveAiSearchEnabled('serve', performanceOnly), false)
+    assert.equal(resolveAiSearchEnabled('build', enabledConfig), false)
+    assert.equal(resolveAiSearchEnabled('preview', enabledConfig), false)
+
+    assert.deepEqual(DEFAULT_SITE_CONFIG, {
+        aiSearch: { enabled: false },
+        performance: { prefetchLinks: false },
+    })
+    assert.ok(Object.isFrozen(DEFAULT_SITE_CONFIG))
+    assert.ok(Object.isFrozen(DEFAULT_SITE_CONFIG.aiSearch))
+    assert.ok(Object.isFrozen(DEFAULT_SITE_CONFIG.performance))
+    assert.equal(
+        SITE_CONFIG_PATH,
+        path.resolve(
+            fileURLToPath(new URL('..', import.meta.url)),
+            'config.json'
+        )
+    )
+
     assert.equal(MODEL_TIMEOUT_MS, 300_000)
     assert.equal(resolveModelTimeoutMs('12345'), 12_345)
     assert.equal(resolveModelTimeoutMs('not-a-number'), MODEL_TIMEOUT_MS)
     assert.equal(resolveModelTimeoutMs(0), MODEL_TIMEOUT_MS)
     assert.equal(resolveModelTimeoutMs(null), MODEL_TIMEOUT_MS)
     assert.deepEqual(
-        readAiSearchConfig(path.join(docsRoot, 'missing-config.json')),
-        DEFAULT_AI_SEARCH_CONFIG
+        readSiteConfig(path.join(docsRoot, 'missing-config.json')),
+        DEFAULT_SITE_CONFIG
     )
-    assert.equal(
-        typeof readAiSearchConfig(AI_SEARCH_CONFIG_PATH).enabled,
-        'boolean'
-    )
+    const rootConfig = readSiteConfig(SITE_CONFIG_PATH)
+    assert.equal(typeof rootConfig.aiSearch.enabled, 'boolean')
+    assert.equal(typeof rootConfig.performance.prefetchLinks, 'boolean')
 
     for (const invalid of [
         null,
         [],
         'true',
-        { enabled: 'true' },
-        { enabled: true, apiKey: 'sk-test-secret' },
-        { enabled: true, baseUrl: 'https://example.invalid' },
+        1,
+        {},
+        { aiSearch: null, performance: { prefetchLinks: false } },
+        { aiSearch: [], performance: { prefetchLinks: false } },
+        { aiSearch: {}, performance: { prefetchLinks: false } },
+        { aiSearch: { enabled: 'true' }, performance: { prefetchLinks: false } },
+        { aiSearch: { enabled: 1 }, performance: { prefetchLinks: false } },
+        { performance: { prefetchLinks: false } },
+        { aiSearch: { enabled: true } },
+        { aiSearch: { enabled: true }, performance: null },
+        { aiSearch: { enabled: true }, performance: [] },
+        { aiSearch: { enabled: true }, performance: {} },
+        {
+            aiSearch: { enabled: true },
+            performance: { prefetchLinks: 'false' },
+        },
+        { aiSearch: { enabled: true }, performance: { prefetchLinks: 1 } },
+        {
+            aiSearch: { enabled: true },
+            performance: { prefetchLinks: true, apiKey: 'sk-test-secret' },
+        },
+        {
+            aiSearch: {
+                enabled: false,
+                baseUrl: 'https://example.invalid',
+            },
+            performance: { prefetchLinks: false },
+        },
+        {
+            aiSearch: { enabled: true },
+            performance: { prefetchLinks: false },
+            extra: true,
+        },
     ]) {
         assert.throws(
-            () => parseAiSearchConfig(invalid),
+            () => parseSiteConfig(invalid),
             (error) => {
                 assert.doesNotMatch(
                     error.message,
@@ -2227,18 +2543,28 @@ test('exposes one boolean switch and always disables production builds', async (
     }
 
     const configDir = await mkdtemp(
-        path.join(tmpdir(), 'ai-search-config-')
+        path.join(tmpdir(), 'site-config-')
     )
     try {
         const invalidFile = path.join(configDir, 'invalid.json')
         await writeFile(
             invalidFile,
-            '{"enabled":true,"apiKey":"sk-config-secret"}',
+            '{"aiSearch":{"enabled":true},"performance":{"prefetchLinks":false},"apiKey":"sk-config-secret"}',
             'utf8'
         )
         assert.throws(
-            () => readAiSearchConfig(invalidFile),
+            () => readSiteConfig(invalidFile),
             (error) => {
+                assert.doesNotMatch(error.message, /sk-config-secret/)
+                return true
+            }
+        )
+        const malformedFile = path.join(configDir, 'malformed.json')
+        await writeFile(malformedFile, '{"aiSearch":', 'utf8')
+        assert.throws(
+            () => readSiteConfig(malformedFile),
+            (error) => {
+                assert.match(error.message, /config\.json/)
                 assert.doesNotMatch(error.message, /sk-config-secret/)
                 return true
             }
@@ -2306,8 +2632,10 @@ test('production public define is disabled and carries no private sentinels', as
 
 test('enforces the configured model timeout and reports it without details', async () => {
     let calls = 0
-    const requestModel = ({ signal }) => {
+    const seenTimeouts = []
+    const requestModel = ({ signal, timeoutMs }) => {
         calls += 1
+        seenTimeouts.push(timeoutMs)
         return new Promise((resolve, reject) => {
             const abort = () => {
                 reject(
@@ -2331,6 +2659,7 @@ test('enforces the configured model timeout and reports it without details', asy
     assert.equal(direct.status, 'timeout')
     assert.deepEqual(direct.sources, [])
     assert.equal(calls, 1)
+    assert.equal(seenTimeouts[0], 20)
 
     const response = await callService(service, {
         body: queryBody('pendulum period', 'en'),
@@ -2361,6 +2690,219 @@ test('enforces the configured model timeout and reports it without details', asy
         adapterResponse.rawBody,
         /sk-leak|example\.invalid|provider/
     )
+})
+
+test('disabled service never resolves or reads the private timeout', async () => {
+    let resolved = 0
+    let calls = 0
+    const service = createAiSearchService({
+        docsRoot,
+        enabled: false,
+        requestModel: async () => {
+            calls += 1
+            return 'never'
+        },
+        resolveModelTimeout: async () => {
+            resolved += 1
+            throw new Error('private configuration must not be read')
+        },
+    })
+
+    const direct = await service.search('pendulum period', 'en')
+    assert.equal(direct.status, 'disabled')
+    assert.deepEqual(direct.sources, [])
+    assert.equal(resolved, 0)
+    assert.equal(calls, 0)
+
+    const response = await callService(service, {
+        body: queryBody('pendulum period', 'en'),
+    })
+    assert.equal(response.status, 404)
+    assert.equal(response.json.code, 'ai_disabled')
+    assert.equal(resolved, 0)
+    assert.equal(calls, 0)
+})
+
+test('resolves the private timeout only for an enabled query with matches', async () => {
+    let resolved = 0
+    const model = createModel('A useful answer')
+    const service = createService({
+        requestModel: model.requestModel,
+        resolveModelTimeout: async () => {
+            resolved += 1
+            return 12_345
+        },
+    })
+
+    const none = await service.search('unfindable-term-xyz', 'en')
+    assert.equal(none.status, 'no_results')
+    assert.equal(resolved, 0)
+    assert.equal(model.calls.length, 0)
+
+    const found = await service.search('pendulum period', 'en')
+    assert.equal(found.status, 'ok')
+    assert.equal(resolved, 1)
+    assert.equal(model.calls.length, 1)
+    assert.equal(model.calls[0].timeoutMs, 12_345)
+})
+
+test('default resolver reads an isolated private config only for a matching query', async (t) => {
+    const dir = await mkdtemp(
+        path.join(tmpdir(), 'ai-search-private-timeout-')
+    )
+    const previous = process.env.AI_MODEL_CONFIG
+    t.after(async () => {
+        if (previous === undefined) delete process.env.AI_MODEL_CONFIG
+        else process.env.AI_MODEL_CONFIG = previous
+        await rm(dir, { recursive: true, force: true })
+    })
+
+    const seen = []
+    const requestModel = async ({ timeoutMs }) => {
+        seen.push(timeoutMs)
+        return 'The period depends on length and gravity.'
+    }
+    const service = createAiSearchService({
+        docsRoot,
+        enabled: true,
+        requestModel,
+    })
+
+    // A missing alternate config would make a premature resolver call fail;
+    // no-match queries must never reach that point.
+    process.env.AI_MODEL_CONFIG = path.join(dir, 'missing.yaml')
+    const none = await service.search('unfindable-term-xyz', 'en')
+    assert.equal(none.status, 'no_results')
+    assert.deepEqual(seen, [])
+
+    // This is a test-only isolated fixture; it contains no real credential.
+    const configPath = path.join(dir, 'config.yaml')
+    await writeFile(
+        configPath,
+        [
+            'timeoutMs: 25',
+            'providers:',
+            '  isolated:',
+            '    baseUrl: "https://example.invalid/v1"',
+            '    api: openai-completions',
+            '    apiKey: "sk-test-isolated"',
+            '    models:',
+            '      - id: "isolated-model"',
+            '        contextWindow: 4096',
+            '        maxTokens: 1024',
+        ].join('\n'),
+        'utf8'
+    )
+    process.env.AI_MODEL_CONFIG = configPath
+
+    const found = await service.search('pendulum period', 'en')
+    assert.equal(found.status, 'ok')
+    assert.deepEqual(seen, [25])
+})
+
+test('uses one small resolved timeout for the watchdog and the adapter', async () => {
+    const seenTimeouts = []
+    const requestModel = ({ signal, timeoutMs }) => {
+        seenTimeouts.push(timeoutMs)
+        return new Promise((resolve, reject) => {
+            const abort = () => {
+                reject(
+                    Object.assign(new Error('aborted'), {
+                        code: 'ABORT_ERR',
+                    })
+                )
+            }
+            if (signal.aborted) {
+                abort()
+                return
+            }
+            signal.addEventListener('abort', abort, { once: true })
+        })
+    }
+
+    const service = createAiSearchService({
+        docsRoot,
+        enabled: true,
+        requestModel,
+        resolveModelTimeout: async () => 25,
+    })
+
+    const started = Date.now()
+    const result = await service.search('pendulum period', 'en')
+    const elapsed = Date.now() - started
+
+    assert.equal(result.status, 'timeout')
+    assert.deepEqual(seenTimeouts, [25])
+    assert.ok(elapsed >= 20, `elapsed ${elapsed}`)
+    assert.ok(elapsed < 2_000, `elapsed ${elapsed}`)
+})
+
+test('timeout resolution failures stay generic and never call the model', async () => {
+    let calls = 0
+    const service = createService({
+        requestModel: async () => {
+            calls += 1
+            return 'never'
+        },
+        resolveModelTimeout: async () => {
+            throw new Error(
+                'PRIVATE_CONFIG_SENTINEL sk-leak https://example.invalid'
+            )
+        },
+    })
+
+    const direct = await service.search('pendulum period', 'en')
+    assert.equal(direct.status, 'model_error')
+    assert.deepEqual(direct.sources, [])
+    assert.equal(calls, 0)
+
+    const response = await callService(service, {
+        body: queryBody('pendulum period', 'en'),
+    })
+    assert.equal(response.status, 502)
+    assert.equal(response.json.code, 'model_error')
+    assert.equal(calls, 0)
+    assert.doesNotMatch(
+        response.rawBody,
+        /PRIVATE_CONFIG_SENTINEL|sk-leak|example\.invalid|tools\/config|provider/i
+    )
+})
+
+test('explicit service and environment timeouts bypass private resolution', async (t) => {
+    const previous = process.env.AI_REQUEST_TIMEOUT_MS
+    t.after(() => {
+        if (previous === undefined) delete process.env.AI_REQUEST_TIMEOUT_MS
+        else process.env.AI_REQUEST_TIMEOUT_MS = previous
+    })
+
+    let resolved = 0
+    const seenTimeouts = []
+    const requestModel = async ({ timeoutMs }) => {
+        seenTimeouts.push(timeoutMs)
+        return 'A useful answer'
+    }
+    const resolveModelTimeout = async () => {
+        resolved += 1
+        return 999_999
+    }
+
+    process.env.AI_REQUEST_TIMEOUT_MS = '60'
+    const envService = createService({ requestModel, resolveModelTimeout })
+    const envResult = await envService.search('pendulum period', 'en')
+    assert.equal(envResult.status, 'ok')
+    assert.equal(seenTimeouts.at(-1), 60)
+    assert.equal(resolved, 0)
+
+    process.env.AI_REQUEST_TIMEOUT_MS = '70'
+    const optionService = createService({
+        requestModel,
+        resolveModelTimeout,
+        timeoutMs: 50,
+    })
+    const optionResult = await optionService.search('pendulum period', 'en')
+    assert.equal(optionResult.status, 'ok')
+    assert.equal(seenTimeouts.at(-1), 50)
+    assert.equal(resolved, 0)
 })
 
 test('production config compiles the client switch to false', async () => {

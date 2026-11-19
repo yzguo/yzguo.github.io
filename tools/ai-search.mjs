@@ -28,6 +28,11 @@
  * - Front matter is never sent to the model. Pages with `search: false`,
  *   `draft: true`, or `private: true` are excluded entirely. HTML comments,
  *   hidden/generated directories, and non-public assets are excluded too.
+ * - Index reads verify the opened inode, reject symlinks, directory escapes,
+ *   and changed paths, and refuse any file sharing the default or
+ *   env-selected private configuration identity. Identities are re-resolved
+ *   before and after each read, so a config replaced at runtime cannot leak
+ *   through a hardlink.
  * - Markdown fenced/indented code blocks are excluded before any raw-HTML
  *   scanning, so script/style examples inside code cannot shift block
  *   boundaries. Raw script/style blocks with ambiguous end boundaries cause
@@ -42,7 +47,7 @@
  * no authentication, no network access, and reads no model configuration.
  */
 
-import { readdir, readFile } from 'node:fs/promises'
+import { open, readdir } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createMarkdownRenderer } from 'vitepress'
@@ -55,8 +60,8 @@ import {
     pathKey,
     resolveFileSystemOps,
     resolveProtectedResource,
-} from './ai-search-config.mjs'
-import { sanitizeMarkdownForModel } from './markdown-privacy.mjs'
+} from './site-config.mjs'
+import { sanitizeMarkdownForModel } from './markdown-safety.mjs'
 
 export const AI_SEARCH_PATH = '/__ai-search'
 export const MAX_BODY_BYTES = 8 * 1024
@@ -66,6 +71,9 @@ export const MAX_ANSWER_CHARS = 6000
 export const MODEL_TIMEOUT_MS = 300_000
 export const MAX_MODEL_TIMEOUT_MS = 2_147_483_647
 export const MAX_CONCURRENT_MODEL_REQUESTS = 1
+
+const MODULE_DIRECTORY = path.dirname(fileURLToPath(import.meta.url))
+const DEFAULT_PRIVATE_CONFIG_PATH = path.join(MODULE_DIRECTORY, 'config.yaml')
 
 /**
  * Canonical language ids used internally. The site has exactly three
@@ -803,6 +811,178 @@ function splitForChunks(value, maximum = 1000) {
     return chunks.length ? chunks : ['']
 }
 
+function privateConfigCandidates() {
+    const values = [DEFAULT_PRIVATE_CONFIG_PATH]
+    const configured = process.env.AI_MODEL_CONFIG
+    if (typeof configured === 'string' && configured.trim() !== '') {
+        values.push(configured.trim())
+    }
+    return values
+}
+
+/**
+ * Accumulate the identities of the default and env-selected private tool
+ * configurations. Only filesystem metadata is consulted; file contents are
+ * never read. Any unexpected resolution failure fails the whole index closed.
+ */
+function observePrivateConfigs(state, fsOps) {
+    for (const value of privateConfigCandidates()) {
+        let entry
+        try {
+            entry = resolveProtectedResource(value, {
+                fs: fsOps,
+                label: 'Private configuration',
+            })
+        } catch {
+            throw new Error('无法安全解析私有配置身份，已拒绝建立索引')
+        }
+        if (entry.identity) state.identities.add(entry.identity)
+        state.fileKeys.add(entry.lexicalKey)
+        state.fileKeys.add(entry.canonicalKey)
+        if (entry.directory) {
+            state.directoryKeys.push(entry.lexicalKey, entry.canonicalKey)
+        }
+    }
+}
+
+function createPrivateConfigState(observedIdentities) {
+    return {
+        identities:
+            observedIdentities instanceof Set
+                ? observedIdentities
+                : new Set(),
+        fileKeys: new Set(),
+        directoryKeys: [],
+    }
+}
+
+function isProtectedPrivateConfig(state, identity, canonical) {
+    if (identity && state.identities.has(identity)) return true
+    const canonicalKey = pathKey(canonical)
+    if (state.fileKeys.has(canonicalKey)) return true
+    for (const directoryKey of state.directoryKeys) {
+        if (isWithinPath(directoryKey, canonicalKey)) return true
+    }
+    return false
+}
+
+/**
+ * Read one Markdown file only after proving the opened file is still the
+ * regular file seen before opening, stays inside the real docs root, and is
+ * not the default or env-selected private configuration. Identities are
+ * re-resolved before and after the read so a private config replaced at
+ * runtime cannot be sent to a model through a hardlink. Symlinks, directory
+ * escapes, identity changes, and unresolved private-config metadata all fail
+ * closed for that file (or the whole index for metadata errors).
+ */
+async function readMarkdownSafely(file, rootKey, state, fsOps) {
+    let before
+    try {
+        before = fsOps.lstatSync(file)
+    } catch (error) {
+        if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') return null
+        throw error
+    }
+    if (before.isSymbolicLink() || !before.isFile()) return null
+    const beforeIdentity = fileIdentity(before)
+    if (!beforeIdentity) return null
+
+    let canonical
+    try {
+        canonical = fsOps.realpathSync(file)
+    } catch (error) {
+        if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') return null
+        throw error
+    }
+    if (
+        !isWithinPath(rootKey, pathKey(canonical)) ||
+        isPrivateResourcePath(canonical)
+    ) {
+        return null
+    }
+
+    let handle
+    try {
+        handle = await open(file, 'r')
+    } catch (error) {
+        if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') return null
+        throw error
+    }
+
+    try {
+        const openedStats = await handle.stat()
+        const openedIdentity = fileIdentity(openedStats)
+        if (!openedStats.isFile() || !openedIdentity) return null
+        // The path must not have been replaced between lstat and open.
+        if (openedIdentity !== beforeIdentity) return null
+
+        // Re-check the path after opening. A junction/symlink swap that still
+        // resolved inside docs cannot hide the opened inode from this check.
+        let openedCanonical
+        try {
+            openedCanonical = fsOps.realpathSync(file)
+        } catch {
+            return null
+        }
+        if (
+            !isWithinPath(rootKey, pathKey(openedCanonical)) ||
+            isPrivateResourcePath(openedCanonical)
+        ) {
+            return null
+        }
+        let canonicalStats
+        try {
+            canonicalStats = fsOps.statSync(openedCanonical)
+        } catch {
+            return null
+        }
+        if (
+            !canonicalStats.isFile() ||
+            fileIdentity(canonicalStats) !== openedIdentity
+        ) {
+            return null
+        }
+
+        if (
+            isProtectedPrivateConfig(
+                state,
+                openedIdentity,
+                openedCanonical
+            )
+        ) {
+            return null
+        }
+        observePrivateConfigs(state, fsOps)
+        if (
+            isProtectedPrivateConfig(
+                state,
+                openedIdentity,
+                openedCanonical
+            )
+        ) {
+            return null
+        }
+
+        const markdown = await handle.readFile('utf8')
+
+        // A private config linked to this inode after the pre-read checks must
+        // invalidate the content before it can enter the index.
+        observePrivateConfigs(state, fsOps)
+        if (
+            isProtectedPrivateConfig(
+                state,
+                openedIdentity,
+                openedCanonical
+            )
+        ) {
+            return null
+        }
+        return markdown
+    } finally {
+        await handle.close().catch(() => {})
+    }
+}
+
 async function listMarkdownFiles(root) {
     const files = []
 
@@ -843,19 +1023,29 @@ async function listMarkdownFiles(root) {
  * Build a deterministic retrieval index. Public pages only. The index never
  * leaves the dev server.
  */
-export async function buildDocsIndex(docsRoot) {
+export async function buildDocsIndex(docsRoot, options = {}) {
     const root = path.resolve(docsRoot)
-    const files = await listMarkdownFiles(root)
+    const fsOps = resolveFileSystemOps(options.fs)
+    const state = createPrivateConfigState(options.observedPrivateIdentities)
+    let rootKey
+    try {
+        rootKey = pathKey(fsOps.realpathSync(root))
+    } catch (error) {
+        if (error?.code !== 'ENOENT' && error?.code !== 'ENOTDIR') throw error
+        rootKey = null
+    }
+    if (rootKey) observePrivateConfigs(state, fsOps)
+    const files = rootKey ? await listMarkdownFiles(root) : []
     const chunks = []
 
     for (const file of files) {
-        let markdown
-        try {
-            markdown = await readFile(file, 'utf8')
-        } catch (error) {
-            if (error && error.code === 'ENOENT') continue
-            throw error
-        }
+        const markdown = await readMarkdownSafely(
+            file,
+            rootKey,
+            state,
+            fsOps
+        )
+        if (markdown === null) continue
 
         const relativePath = toPosixPath(path.relative(root, file))
         const lang = languageForPath(relativePath)
@@ -1075,31 +1265,52 @@ function sanitizeAnswer(value) {
     return limited
 }
 
-let defaultRequestModelPromise = null
+let aiModelModulePromise = null
 
 /**
  * Import the independent model adapter lazily. Importing this module never
- * reads model configuration or performs network access by itself. The adapter
- * reads its own local ignored configuration only when a request is made.
+ * reads private tool configuration or performs network access by itself.
+ * The adapter reads its own local ignored `tools/config.yaml` only when an
+ * actual model request is made, so disabled services and production builds
+ * never load credentials.
  */
-async function defaultRequestModel(args) {
-    if (!defaultRequestModelPromise) {
-        defaultRequestModelPromise = import('./ai-model.mjs')
-            .then((module) => {
-                if (typeof module.requestModel !== 'function') {
-                    throw new Error('requestModel export is missing')
-                }
-                return module.requestModel
-            })
-            .catch((error) => {
-                // Allow a later request to retry after a transient import
-                // failure instead of caching a rejected promise forever.
-                defaultRequestModelPromise = null
-                throw error
-            })
+function loadAiModelModule() {
+    if (!aiModelModulePromise) {
+        aiModelModulePromise = import('./ai-model.mjs').catch((error) => {
+            // Allow a later attempt to retry after a transient import failure
+            // instead of caching a rejected promise forever.
+            aiModelModulePromise = null
+            throw error
+        })
     }
-    const requestModel = await defaultRequestModelPromise
-    return requestModel(args)
+    return aiModelModulePromise
+}
+
+async function defaultRequestModel(args) {
+    const module = await loadAiModelModule()
+    if (typeof module.requestModel !== 'function') {
+        throw new Error('requestModel export is missing')
+    }
+    return module.requestModel(args)
+}
+
+/**
+ * Resolve the effective request timeout on demand. Only the non-sensitive
+ * parsed timeout leaves the adapter; credentials, endpoints, and model
+ * metadata are never returned or logged here. This runs only after an enabled
+ * request has produced matches, so a disabled service, a no-match query, and a
+ * production build never read the private configuration.
+ */
+async function defaultResolveModelTimeout() {
+    const module = await loadAiModelModule()
+    if (typeof module.getModelInfo !== 'function') {
+        throw new Error('getModelInfo export is missing')
+    }
+    const info = await module.getModelInfo()
+    if (!Number.isSafeInteger(info?.timeoutMs) || info.timeoutMs < 1) {
+        throw new Error('resolved model timeout is invalid')
+    }
+    return info.timeoutMs
 }
 
 function singleHeader(value) {
@@ -1378,7 +1589,7 @@ export function resolveModelTimeoutMs(value = process.env.AI_REQUEST_TIMEOUT_MS)
 
 /**
  * The Vite dev server normally serves any file inside its workspace root,
- * including `tools/model-config.yaml` through `/@fs/`. This guard fails closed for
+ * including `tools/config.yaml` through `/@fs/`. This guard fails closed for
  * private model configuration and for symlink escapes out of the directories
  * the site actually needs (docs, docs/public, node_modules).
  *
@@ -1473,7 +1684,7 @@ export function createFileAccessGuard(options = {}) {
     const defaultModelConfigPath = path.join(
         options.repoRoot || baseDirectory,
         'tools',
-        'model-config.yaml'
+        'config.yaml'
     )
     const modelConfigPath = options.modelConfigPath ?? defaultModelConfigPath
     protectedSpecs.push({
@@ -1676,10 +1887,16 @@ function sendForbidden(response) {
  * Create the search service used by the Vite middleware and by tests.
  * `requestModel` is injectable so the retrieval and HTTP security paths can be
  * tested without model configuration, credentials, or network access.
+ * `resolveModelTimeout` is injectable too; by default the non-sensitive timeout
+ * is read from the private configuration only after an enabled request has
+ * matches, and the same value bounds both the adapter and the outer watchdog.
  *
  * `enabled` defaults to false. The VitePress plugin passes the resolved public
  * switch explicitly; a disabled service refuses the endpoint without building
- * an index or calling a model.
+ * an index or calling a model. Constructing the service, serving a disabled
+ * request, or handling a query with no matches never imports the model adapter
+ * and never reads `tools/config.yaml`; the adapter loads that private file
+ * lazily only when an actual model request is made.
  */
 export function createAiSearchService(options = {}) {
     const docsRoot = path.resolve(
@@ -1687,7 +1904,18 @@ export function createAiSearchService(options = {}) {
             fileURLToPath(new URL('../docs/', import.meta.url))
     )
     const requestModel = options.requestModel || defaultRequestModel
+    const resolveModelTimeout =
+        options.resolveModelTimeout || defaultResolveModelTimeout
     const enabled = options.enabled === true
+    // One timeout governs both the outer watchdog and the adapter:
+    // options.timeoutMs > AI_REQUEST_TIMEOUT_MS > tools/config.yaml timeoutMs >
+    // MODEL_TIMEOUT_MS. The private file is resolved lazily, only after an
+    // enabled request has matches, so disabled services and production builds
+    // never read it.
+    const timeoutOverride =
+        options.timeoutMs !== undefined ||
+        (typeof process.env.AI_REQUEST_TIMEOUT_MS === 'string' &&
+            process.env.AI_REQUEST_TIMEOUT_MS.trim() !== '')
     const timeoutMs = options.timeoutMs === undefined
         ? resolveModelTimeoutMs()
         : normalizeTimeoutMs(options.timeoutMs)
@@ -1702,13 +1930,19 @@ export function createAiSearchService(options = {}) {
     if (typeof requestModel !== 'function') {
         throw new TypeError('requestModel must be a function')
     }
+    if (typeof resolveModelTimeout !== 'function') {
+        throw new TypeError('resolveModelTimeout must be a function')
+    }
 
     let indexPromise = null
     let activeModelRequests = 0
+    const observedPrivateIdentities = new Set()
 
     const loadIndex = () => {
         if (!indexPromise) {
-            indexPromise = buildDocsIndex(docsRoot).catch((error) => {
+            indexPromise = buildDocsIndex(docsRoot, {
+                observedPrivateIdentities,
+            }).catch((error) => {
                 indexPromise = null
                 throw error
             })
@@ -1760,12 +1994,35 @@ export function createAiSearchService(options = {}) {
             return { status: 'busy', sources: [] }
         }
 
+        // The private timeout is read on demand only here: after the switch is
+        // enabled and the query produced matches. The reservation prevents a
+        // second request from starting while the configuration is read. Errors
+        // are discarded so no configuration or path text can leak.
+        let requestTimeoutMs = timeoutMs
+        activeModelRequests += 1
+        try {
+            if (!timeoutOverride) {
+                requestTimeoutMs = normalizeTimeoutMs(await resolveModelTimeout())
+            }
+        } catch {
+            if (signal?.aborted) {
+                return { status: 'aborted', sources: [] }
+            }
+            return { status: 'model_error', sources: [] }
+        } finally {
+            activeModelRequests -= 1
+        }
+        if (signal?.aborted) {
+            return { status: 'aborted', sources: [] }
+        }
+
         const sources = sourcesFromMatches(matches)
         const prompt = buildPrompt(query, matches)
 
-        // The adapter receives both the configured timeout and an abort
-        // signal. The same timeout is enforced here as an outer bound, so a
-        // slow adapter cannot keep the single model slot forever.
+        // The adapter receives the resolved timeout and an abort signal. The
+        // same timeout is enforced here as an outer bound, so the watchdog and
+        // the adapter always agree and a slow adapter cannot keep the single
+        // model slot forever.
         const modelAbort = new AbortController()
         let timedOut = false
         const relayAbort = () => modelAbort.abort()
@@ -1775,7 +2032,7 @@ export function createAiSearchService(options = {}) {
         const timeoutHandle = setTimeout(() => {
             timedOut = true
             modelAbort.abort()
-        }, timeoutMs)
+        }, requestTimeoutMs)
 
         let rawAnswer
         activeModelRequests += 1
@@ -1783,7 +2040,7 @@ export function createAiSearchService(options = {}) {
             rawAnswer = await requestModel({
                 system: SYSTEM_PROMPTS[canonicalLanguage],
                 prompt,
-                timeoutMs,
+                timeoutMs: requestTimeoutMs,
                 signal: modelAbort.signal,
             })
         } catch (error) {

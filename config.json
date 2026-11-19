@@ -1,0 +1,8 @@
+{
+    "aiSearch": {
+        "enabled": false
+    },
+    "performance": {
+        "prefetchLinks": false
+    }
+}

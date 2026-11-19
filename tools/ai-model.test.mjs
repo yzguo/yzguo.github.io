@@ -6,8 +6,9 @@ import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { stringify as stringifyYaml } from 'yaml'
 import {
-  AI_MODEL_CONFIG_PATH,
+  TOOL_CONFIG_PATH,
   DEFAULT_TIMEOUT_MS,
+  DEFAULT_MAX_OUTPUT_TOKENS,
   getModelInfo,
   requestModel,
   sanitizeModelError
@@ -40,12 +41,14 @@ function makeConfigText(options = {}) {
     api = 'openai-completions',
     providerName = 'ustc',
     models = [MODEL_A, MODEL_B],
-    providerExtra = {}
+    providerExtra = {},
+    configExtra = {}
   } = options
   // Distinguish an omitted option from an explicit `undefined`: callers use
   // `{ apiKey: undefined }` to test a config that genuinely has no key.
   const apiKey = Object.hasOwn(options, 'apiKey') ? options.apiKey : SECRET
   return stringifyYaml({
+    ...configExtra,
     providers: {
       [providerName]: {
         baseUrl,
@@ -64,7 +67,7 @@ async function makeTempDir(t) {
   return dir
 }
 
-async function writeConfig(t, text = makeConfigText(), fileName = 'model-config.yaml') {
+async function writeConfig(t, text = makeConfigText(), fileName = 'config.yaml') {
   const dir = await makeTempDir(t)
   const configPath = path.join(dir, fileName)
   await writeFile(configPath, text, 'utf8')
@@ -160,6 +163,8 @@ test('getModelInfo exposes metadata but never the API key', async (t) => {
   assert.equal(info.provider, 'ustc')
   assert.equal(info.api, 'openai-completions')
   assert.equal(info.endpoint, `${BASE_URL}/chat/completions`)
+  assert.equal(info.timeoutMs, DEFAULT_TIMEOUT_MS)
+  assert.equal(info.maxOutputTokens, DEFAULT_MAX_OUTPUT_TOKENS)
   assert.equal(info.model.id, 'model-a')
   assert.equal(info.model.name, 'Model A')
   assert.equal(info.model.contextWindow, 1_000_000)
@@ -186,6 +191,151 @@ test('model selection accepts an id, a display name, and the default', async (t)
     (error) => {
       assert.equal(error.code, 'MODEL_CONFIG_ERROR')
       assert.match(error.message, /model-a, model-b/)
+      assertNoSecret(error.message)
+      return true
+    }
+  )
+})
+
+test('top-level provider and model choose defaults, with env and options overriding', async (t) => {
+  const configPath = await writeConfig(t, stringifyYaml({
+    provider: 'beta',
+    model: 'model-b',
+    providers: {
+      alpha: {
+        baseUrl: BASE_URL,
+        api: 'openai-completions',
+        apiKey: SECRET,
+        models: [MODEL_A]
+      },
+      beta: {
+        baseUrl: BASE_URL,
+        api: 'openai-completions',
+        apiKey: SECRET,
+        models: [MODEL_B]
+      }
+    }
+  }))
+
+  const byConfig = await getModelInfo({ configPath })
+  assert.equal(byConfig.provider, 'beta')
+  assert.equal(byConfig.model.id, 'model-b')
+
+  const byOptions = await getModelInfo({
+    configPath,
+    provider: 'alpha',
+    model: 'model-a'
+  })
+  assert.equal(byOptions.provider, 'alpha')
+  assert.equal(byOptions.model.id, 'model-a')
+
+  const previousProvider = process.env.AI_MODEL_PROVIDER
+  const previousModel = process.env.AI_MODEL
+  t.after(() => {
+    if (previousProvider === undefined) delete process.env.AI_MODEL_PROVIDER
+    else process.env.AI_MODEL_PROVIDER = previousProvider
+    if (previousModel === undefined) delete process.env.AI_MODEL
+    else process.env.AI_MODEL = previousModel
+  })
+  process.env.AI_MODEL_PROVIDER = 'alpha'
+  process.env.AI_MODEL = 'Model A'
+  const byEnv = await getModelInfo({ configPath })
+  assert.equal(byEnv.provider, 'alpha')
+  assert.equal(byEnv.model.id, 'model-a')
+
+  process.env.AI_MODEL_PROVIDER = 'beta'
+  process.env.AI_MODEL = 'model-b'
+  const byOptionOverEnv = await getModelInfo({
+    configPath,
+    provider: 'alpha',
+    model: 'model-a'
+  })
+  assert.equal(byOptionOverEnv.provider, 'alpha')
+  assert.equal(byOptionOverEnv.model.id, 'model-a')
+})
+
+test('invalid top-level provider, model, timeout, or output defaults fail closed', async (t) => {
+  const cases = [
+    [{ provider: 'missing-provider' }, /模型提供方/],
+    [{ model: 'missing-model' }, /未找到指定的模型/],
+    [{ provider: 7 }, /provider/],
+    [{ model: ['model-a'] }, /model/],
+    [{ timeoutMs: 0 }, /timeoutMs/],
+    [{ timeoutMs: '25' }, /timeoutMs/],
+    [{ timeoutMs: 2_147_483_648 }, /timeoutMs/],
+    [{ maxOutputTokens: 0 }, /maxOutputTokens/],
+    [{ maxOutputTokens: '10' }, /maxOutputTokens/]
+  ]
+
+  for (const [configExtra, pattern] of cases) {
+    const configPath = await writeConfig(t, makeConfigText({ configExtra }))
+    await assert.rejects(
+      getModelInfo({ configPath }),
+      (error) => {
+        assert.equal(error.code, 'MODEL_CONFIG_ERROR')
+        assert.match(error.message, pattern)
+        assertNoSecret(error.message)
+        return true
+      }
+    )
+  }
+})
+
+test('top-level timeoutMs and maxOutputTokens control requests without explicit overrides', async (t) => {
+  const configPath = await writeConfig(t, makeConfigText({
+    configExtra: { timeoutMs: 25, maxOutputTokens: 64 }
+  }))
+
+  const info = await getModelInfo({ configPath })
+  assert.equal(info.timeoutMs, 25)
+  assert.equal(info.maxOutputTokens, 64)
+
+  const fromConfig = recordingFetch(() => jsonResponse(completion()))
+  await requestModel({
+    configPath,
+    prompt: 'hello',
+    fetchImpl: fromConfig.fetchImpl
+  })
+  assert.equal(fromConfig.calls[0].body.max_tokens, 64)
+
+  const explicit = recordingFetch(() => jsonResponse(completion()))
+  await requestModel({
+    configPath,
+    prompt: 'hello',
+    maxOutputTokens: 128,
+    fetchImpl: explicit.fetchImpl
+  })
+  assert.equal(explicit.calls[0].body.max_tokens, 128)
+
+  await assert.rejects(
+    requestModel({
+      configPath,
+      prompt: 'hello',
+      fetchImpl: () => new Promise(() => {})
+    }),
+    (error) => {
+      assert.equal(error.code, 'MODEL_TIMEOUT')
+      assert.match(error.message, /25 毫秒/)
+      assertNoSecret(error.message)
+      return true
+    }
+  )
+
+  const previousTimeout = process.env.AI_REQUEST_TIMEOUT_MS
+  t.after(() => {
+    if (previousTimeout === undefined) delete process.env.AI_REQUEST_TIMEOUT_MS
+    else process.env.AI_REQUEST_TIMEOUT_MS = previousTimeout
+  })
+  process.env.AI_REQUEST_TIMEOUT_MS = '30'
+  await assert.rejects(
+    requestModel({
+      configPath,
+      prompt: 'hello',
+      fetchImpl: () => new Promise(() => {})
+    }),
+    (error) => {
+      assert.equal(error.code, 'MODEL_TIMEOUT')
+      assert.match(error.message, /30 毫秒/)
       assertNoSecret(error.message)
       return true
     }
@@ -418,6 +568,7 @@ test('missing, unreadable, malformed, and unsafe configuration fails closed', as
     }),
     (error) => {
       assert.equal(error.code, 'MODEL_CONFIG_ERROR')
+      assert.match(error.message, /工具配置文件不存在/)
       assertNoSecret(error.message)
       return true
     }
@@ -568,7 +719,7 @@ test('repository config paths are limited to ignored safe locations and never do
   const wrongExtension = path.join(
     repositoryRoot,
     'tools',
-    'model-config.txt'
+    'config.txt'
   )
   await assert.rejects(
     getModelInfo({ configPath: wrongExtension }),
@@ -576,7 +727,23 @@ test('repository config paths are limited to ignored safe locations and never do
       assert.equal(error.code, 'MODEL_CONFIG_ERROR')
       assert.match(error.message, /仓库外/)
       assert.ok(!error.message.includes(repositoryRoot))
-      assert.ok(!error.message.includes('model-config.txt'))
+      assert.ok(!error.message.includes('config.txt'))
+      return true
+    }
+  )
+
+  const legacyModelConfig = path.join(
+    repositoryRoot,
+    'tools',
+    'model-config.yaml'
+  )
+  await assert.rejects(
+    getModelInfo({ configPath: legacyModelConfig }),
+    (error) => {
+      assert.equal(error.code, 'MODEL_CONFIG_ERROR')
+      assert.match(error.message, /仓库外/)
+      assert.ok(!error.message.includes(repositoryRoot))
+      assert.ok(!error.message.includes('model-config.yaml'))
       return true
     }
   )
@@ -598,13 +765,14 @@ test('repository config paths are limited to ignored safe locations and never do
   )
 })
 
-test('defaults to tools/model-config.yaml and never falls back to api-key.txt', async (t) => {
+test('defaults to tools/config.yaml and never falls back to api-key.txt', async (t) => {
   assert.equal(
-    AI_MODEL_CONFIG_PATH,
-    path.join(repositoryRoot, 'tools', 'model-config.yaml')
+    TOOL_CONFIG_PATH,
+    path.join(repositoryRoot, 'tools', 'config.yaml')
   )
-  assert.ok(!AI_MODEL_CONFIG_PATH.includes('api-key'))
-  assert.ok(!path.basename(AI_MODEL_CONFIG_PATH).startsWith('api-key.'))
+  assert.equal(path.basename(TOOL_CONFIG_PATH), 'config.yaml')
+  assert.ok(!TOOL_CONFIG_PATH.includes('api-key'))
+  assert.ok(!path.basename(TOOL_CONFIG_PATH).startsWith('api-key.'))
 
   const legacyPath = path.join(repositoryRoot, 'tools', 'api-key.txt')
   await assert.rejects(

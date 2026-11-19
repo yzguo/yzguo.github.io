@@ -2,7 +2,7 @@
 
 [English](README.md) | **简体中文** | [繁體中文](README.zh-TW.md)
 
-一个使用 VitePress 构建、以 Markdown 写作、发布在 GitHub Pages 上的个人网站。站点提供英语、简体中文和繁体中文三个版本，三者的结构、事实与内容覆盖一致。本 README 是唯一的开发入口，说明安装、写作、翻译、检查、安全与发布流程。
+一个使用 VitePress 构建、以 Markdown 写作、发布在 GitHub Pages 上的个人网站。站点提供英语、简体中文和繁体中文三个版本，三者的结构、事实与内容覆盖一致。本 README 是唯一的开发入口，说明安装、写作、翻译、配置、检查、安全与发布流程。
 
 - English: <https://yzguo.github.io/en/>
 - 简体中文: <https://yzguo.github.io/zh-cn/>
@@ -19,7 +19,7 @@
 ├─ README.zh-CN.md
 ├─ README.zh-TW.md
 ├─ package.json
-├─ ai-search.config.json
+├─ config.json
 ├─ docs/
 │  ├─ index.md
 │  ├─ en/
@@ -89,7 +89,7 @@
 - `docs/en/index.md`、`docs/zh-cn/index.md` 与 `docs/zh-tw/index.md`：保持对应的 hero 操作和功能卡片。
 - 顶级栏目、笔记分类和页面数量必须在同一次修改中于三个语言版本同步增删。
 
-## 工具与翻译命令
+## 工具与配置
 
 所有开发工具都在 `tools/`；不要新建第二套工具目录。`package.json` 中的公开命令名是稳定接口，修改内部实现时不得改名。
 
@@ -97,66 +97,87 @@
 pnpm translate:docs
 pnpm translate:docs:write
 pnpm translate:docs:force
-pnpm check:bilingual
-pnpm test:bilingual
-pnpm test:tools
+pnpm check:multilingual:structure
+pnpm check:multilingual
+pnpm test:multilingual
 ```
 
 - `pnpm translate:docs`：只读列出简体中文源及其英语、繁体中文目标；不写文件，也不调用模型。
 - `pnpm translate:docs:write`：只创建缺失目标。英语页面由配置的本机模型翻译；繁体中文页面由本机 OpenCC 离线转换；已有目标不会被覆盖。审阅每个生成文件。
 - `pnpm translate:docs:force`：按相同规则重新生成已有英语和繁体中文目标并覆盖它们。
-- `pnpm check:bilingual`：检查三个文档目录、根目录三份 README、其他受支持的根目录中文文档、逐页结构、事实、数学、代码和链接目标，以及从 `en-us.ts`、`zh-cn.ts`、`zh-tw.ts` 加载的可见界面文案。`docs/index.md` 是根入口，不参与配对。
-- `pnpm test:bilingual`：翻译、三语检查、隐私、路径和写入安全的行为测试。
-- `pnpm test:tools`：AI 适配器与 AI 搜索的行为测试。
+- `pnpm check:multilingual:structure`：只运行第一阶段（等价 CLI：`node tools/check-multilingual.mjs --structure-only`）。它确定性地检查三个版本中每个页面、README 和可见界面文案的语言覆盖、结构、代码、数学、Mermaid、链接和配置，完成后直接退出，不调用模型。它不需要模型配置、凭据或网络。
+- `pnpm check:multilingual`：严格按顺序运行两个阶段。第一阶段完整通过后，第二阶段才会把清理后的配对内容发送给配置的模型做语义审阅。第一阶段有任何错误都意味着零次模型请求。
+- `pnpm test:multilingual`：翻译、两阶段多语言检查、隐私、路径和写入安全的行为测试，包括第一阶段失败时绝不调用模型。
 
 翻译命令接受 `-- --lang en|zh-tw` 或 `-- --only <path>` 以缩小范围。翻译保留代码、公式、数字和 URL 目标；流程图、时序图和状态图的 Mermaid 标签按安全规则翻译，无法安全处理时整批报错且不写入。
 
-- `tools/ai-model.mjs`、`tools/ai-search.mjs` 与 `tools/ai-search-config.mjs`：本机模型适配器、开发服务器的 AI 搜索端点、公开开关和发布扫描。
-- `tools/check-bilingual.mjs`、`tools/translate-docs.mjs`、`tools/traditional-chinese.mjs` 与 `tools/locale-links.mjs`：三语检查、翻译命令行、OpenCC 转换和逐版本链接映射。
-- `tools/model-config.yaml`：被 Git 忽略的默认私有模型配置；仅本机模型适配器在运行时为认证读取。人和 agent 不得读取、打印、复制或提交它。
+- `tools/check-multilingual.mjs`：两阶段多语言检查器。
+- `tools/translate-docs.mjs`：翻译命令行入口。
+- `tools/document-model.mjs`、`tools/markdown-safety.mjs` 与 `tools/semantic-safe.mjs`：文档配对与结构、Markdown 隐私与写入安全、语义审阅投影。
+- `tools/traditional-chinese.mjs` 与 `tools/mermaid-translate.mjs`：OpenCC 转换检查和安全的 Mermaid 标签翻译。
+- `tools/ai-model.mjs` 与 `tools/ai-search.mjs`：本机模型适配器和仅用于开发服务器的 AI 搜索端点。
+- `tools/site-config.mjs`：读取并校验根目录公开的 `config.json`；它绝不读取私有模型配置。
+- `tools/config.yaml`：唯一的默认私有工具配置；仅本机模型适配器在运行时为认证和工具默认值读取它。
 - `tools/*.test.mjs`：与实现同目录的行为测试。
 
-### 本机 AI 搜索与开关
+### 公开站点配置
 
-AI 搜索是可选的本机开发功能，不进入静态生产站点。唯一开关是根目录的公开、非敏感文件 `ai-search.config.json`：
+可选站点功能统一由根目录的公开、非敏感文件 `config.json` 配置。它只能包含已公开的开关；未知字段会被拒绝，且绝不能包含 endpoint、凭据、令牌或个人数据。
 
 ```json
 {
-  "enabled": false
+  "aiSearch": {
+    "enabled": false
+  },
+  "performance": {
+    "prefetchLinks": false
+  }
 }
 ```
 
-默认 `false`。要使用它，将 `enabled` 改为 `true` 并重启 `pnpm docs:dev`。问题和选中的公开页面摘录会发送给配置的模型服务；私有块、HTML 注释、草稿和非公开页面不会进入模型输入。接口只接受来自回环地址且 `Host`/`Origin` 与本站同源匹配的客户端；界面提供取消按钮，错误和超时会明确显示。
+AI 搜索是可选的本机开发功能，不进入静态生产站点。它默认关闭；要使用它，将 `aiSearch.enabled` 改为 `true` 并重启 `pnpm docs:dev`。问题和选中的公开页面摘录会发送给配置的模型服务；私有块、HTML 注释、草稿和非公开页面不会进入模型输入。接口只接受来自回环地址且 `Host`/`Origin` 与本站同源匹配的客户端；界面提供取消按钮，错误和超时会明确显示。
+
+`performance.prefetchLinks` 控制 VitePress 的链接预取。默认 `false` 避免首屏预取其他语言版本的页面，从而减少初始请求；设为 `true` 可能加快后续导航，但会增加首屏请求，请按需取舍。
 
 适配器直接调用 OpenAI 兼容的模型 API。无论文件内容如何，`pnpm docs:build` 都把开关解析为 `false`，因此生产包不含 AI 按钮、endpoint、适配器、配置对象或凭据。GitHub Pages 是纯静态托管；公开可用的 AI 必须另建有服务端凭据保护的后端。开发服务器只提供 `docs/`、`docs/public/` 和 `node_modules/`，构建会拒绝可发布路径中的私有文件或符号链接/junction。这些是纵深防御，不构成对已失陷本地账户或文件系统的绝对保证。
 
-### 本机模型配置
+### 私有工具配置
 
-本机模型适配器默认读取被 Git 忽略的 `tools/model-config.yaml`，或通过 `AI_MODEL_CONFIG` 指定仓库外或受允许的已忽略位置的安全私有 YAML/JSON 文件。配置格式为 YAML；`.json` 文件按 JSON 解析。下面的占位示例本身是有效的配置结构，不包含真实 endpoint 或凭据：
+`tools/config.yaml` 是本机工具唯一的默认私有配置。它被 Git 忽略、仅本机存在，绝不会被服务、打包或发布。它同时保存模型目录和工具默认值：默认服务商、默认模型、请求超时和默认输出上限。仓库内没有第二份逐工具配置文件。
 
 ```yaml
+# Default provider key from `providers` (optional; otherwise the built-in default when present, then the first).
+provider: local
+# Default model id (or display name) within that provider (optional; otherwise the first model).
+model: example-model
+# Model request timeout in milliseconds (optional; default 300000).
+timeoutMs: 300000
+# Default max output tokens per request (optional; default 16384).
+maxOutputTokens: 16384
+
 providers:
   local:
     baseUrl: "https://model.example/v1"
     api: openai-completions
     apiKey: "<your-api-key>"
     models:
-      - id: "<model-id>"
-        name: "<model-name>"
+      - id: example-model
+        name: Example Model
         contextWindow: 32768
         maxTokens: 4096
         input: [text]
+        # optional: reasoningEffort: none|low|medium|high|max|null (also allowed on the provider)
 ```
 
-`api` 必须为 `openai-completions`（也接受 `openai-compatible`）。`baseUrl` 必须使用 HTTPS（本机回环地址可使用 HTTP），且不得包含凭据、查询参数或片段。每个模型的 `id` 必须唯一；`contextWindow` 与 `maxTokens` 为正整数，且 `maxTokens` 不得大于 `contextWindow`；`input` 若存在必须是非空字符串数组。`AI_MODEL`、`AI_MODEL_PROVIDER` 选择已配置的模型和服务商；`AI_REQUEST_TIMEOUT_MS` 默认 `300000` 毫秒，应低于浏览器 15 分钟硬上限。配置缺失、不可读或无效时直接失败，不会回退到环境变量密钥或 OMP。
+`provider` 与 `model` 选择默认值；省略时，适配器优先使用已配置的内置默认服务商，其次使用第一个服务商，并使用该服务商的第一个模型。`timeoutMs` 与 `maxOutputTokens` 是可选正整数，默认值如上。每次运行可用环境变量覆盖：`AI_MODEL_CONFIG` 指向另一份私有 YAML/JSON 文件，`AI_MODEL` 与 `AI_MODEL_PROVIDER` 选择模型和服务商，`AI_REQUEST_TIMEOUT_MS` 设置超时。配置缺失、不可读或无效时直接失败，不会使用伪造回退。
 
-仓库内只接受已忽略的私有位置：`tools/model-config.yaml`（也接受 `.yml` 或 `.json`）、根目录 `.env`/`.env.*`（`.env.example` 除外）、`tools/.env*`，以及 `tools/` 下匹配已忽略密钥模式的文件。`docs/` 等可发布或未被忽略的路径会被拒绝；不得提交私有配置，也不得把密钥放入受版本控制或可发布的路径。
+`providers` 把服务商名称映射到其设置。`api` 必须为 `openai-completions` 或 `openai-compatible`。`baseUrl` 必须使用 HTTPS（本机回环地址可使用 HTTP），且不得包含凭据、查询参数或片段。每个模型的 `id` 必须唯一；`contextWindow` 与 `maxTokens` 若存在必须为正整数，且 `maxTokens` 不得大于 `contextWindow`；`input` 若存在必须是非空字符串数组。`reasoningEffort` 如使用，只能是 `none`、`low`、`medium`、`high`、`max` 或 null。
 
-**私钥规则：**`tools/model-config.yaml` 是用户的真实敏感文件。仅本机模型适配器可在运行时于本机读取它用于认证。人和 agent 不得读取、打印、复制、移动或提交它，也不得把其内容粘贴到文档、源码、Actions 或 AI 对话中；适配器不得泄露其内容。
+**私钥规则：**`tools/config.yaml` 以及 `AI_MODEL_CONFIG` 指定的文件是用户的真实敏感配置。仅本机模型适配器可在运行时于本机读取它们用于认证。人和 agent 不得读取、打印、复制、移动或提交它们，也不得把其内容粘贴到文档、源码、Actions 或 AI 对话中；适配器不得泄露它们。备用文件必须位于仓库外或已忽略的私有位置，绝不能放在 `docs/` 或其他可发布路径。绝不能用占位值覆盖已有的私有配置文件。
 
 ## 本地开发
 
-需要 Node.js 和 pnpm（版本由 `packageManager` 固定）。安装、开发、构建和预览：
+需要 Node.js 和 pnpm（pnpm 版本由 `packageManager` 固定）。安装、开发、构建和预览：
 
 ```sh
 pnpm install --frozen-lockfile
@@ -191,14 +212,18 @@ pnpm docs:preview
 
 | 命令 | 用途 |
 | --- | --- |
-| `pnpm check:bilingual` | 检查三个文档目录、根目录三份 README、页面结构和链接以及可见界面文案，并做模型语义审阅。 |
-| `pnpm test:bilingual` | 翻译、三语检查、隐私、路径和写入安全的行为测试。 |
-| `pnpm test:tools` | AI 适配器与 AI 搜索的行为测试。 |
+| `pnpm check:multilingual:structure` | 只做第一阶段确定性检查：完整的语言覆盖、页面与 README 结构、代码、数学、Mermaid、链接、繁体中文转换和界面文案。不需要模型配置或凭据。 |
+| `pnpm check:multilingual` | 两个阶段：第一阶段必须完整通过，第二阶段才可调用模型做语义审阅。第一阶段有任何错误都意味着零次模型请求。 |
+| `pnpm test:multilingual` | 翻译、两阶段多语言检查、隐私、路径和写入安全的行为测试。 |
 | `pnpm docs:build` | 生成生产站点 `docs/.vitepress/dist`。 |
 
-`pnpm check:bilingual` 会把配对页面内容和界面文案发送给配置的模型，应人工审阅其结论，不能当作翻译质量的证明。GitHub Actions 没有模型凭据，因此该检查只在本地或主验证阶段运行，不包含在部署 workflow 中。
+第一阶段枚举三个文档目录、根目录三份 README、其他受支持的根目录中文文档，以及从 `en-us.ts`、`zh-cn.ts`、`zh-tw.ts` 加载的可见界面文案。它检查路径、标题层级、段落、列表和引用结构、表格、代码围栏、数学、Mermaid 结构、链接目标与语言前缀、未转换的繁体中文、导航、侧栏、frontmatter、受保护内容和配置，并收集全部错误而不是在第一个错误处停止。文件不可读、隐私失败和配置失败同样计为第一阶段错误。`docs/index.md` 是根入口，不参与配对。
+
+只有第一阶段没有任何错误时才运行第二阶段。它把清理后的配对页面内容和界面文案发送给配置的模型，逐页面做语义审阅；语义失败会以非零结果返回。模型输出只是审阅辅助，不能当作翻译质量的证明；请阅读结论，不要把语义失败当成通过。完整命令需要可用的私有模型配置，而 `pnpm check:multilingual:structure` 既不需要凭据，也不需要网络。
 
 人工验收至少覆盖：三个版本的首页、导航、侧栏和笔记条目；根路径针对繁体中文、其他中文、英语及其他语言的自动选择；禁用 JavaScript 或浏览器未提供语言时根路径回退到英文；明确语言路径和导航菜单中的语言切换保持生效；桌面与手机宽度；浅色和深色主题；数学公式与 Mermaid；字体加载；以及无 AI、无本站以外运行时请求的生产构建。
+
+冷缓存验收是目标而非保证：在访客网络、GitHub Pages 和浏览器条件允许时，全新、无缓存的浏览器首次加载每个版本的资源应低于 1 秒。部署后必须等 CI/CD workflow 完成，再用全新的浏览器配置、空缓存（或禁用缓存）测试线上站点，并报告真实测量结果和条件。不得伪造、挑选或隐藏耗时数据。
 
 - 只报告实际运行过的命令、真实输出和覆盖范围；未运行的检查不得声称通过。
 - 不得伪造内容、数据、截图或测试结果，也不得隐藏失败、警告或已知限制。
@@ -209,19 +234,19 @@ pnpm docs:preview
 
 公开仓库中不得出现凭据、私有配置、草稿或未公开的个人数据。
 
-- `tools/model-config.yaml` 必须保持被忽略、仅本机存在；仅本机模型适配器在运行时为认证读取，人和 agent 不得读取、打印、复制或提交它。
+- 根目录 `config.json` 只能包含公开、非敏感开关。不得加入 endpoint、密钥、令牌或私有服务商设置；未知字段会被拒绝。
+- `tools/config.yaml` 必须保持被忽略、仅本机存在。仅本机模型适配器在运行时为认证读取它；人和 agent 不得读取、打印、复制或提交它。
 - 私有块标记 `<!-- private:start -->` 与 `<!-- private:end -->` 只控制模型输入，不改变文件的可发布性；标记内的文字仍可能通过 Git 或 VitePress 公开。
 - HTML 注释和私有块会从模型输入中移除；不要用它们存放密钥，也不要把密钥放进任何 Markdown。
-- `ai-search.config.json` 只能包含公开布尔开关，不得写入 endpoint、密钥或其他敏感配置。
 - 翻译工具在写入整批文件前验证结果并检查冲突；冲突检查不能代替备份。避免同时编辑目标文件，`translate:docs:force` 会覆盖已有英语和繁体中文页面。
-- 构建会拒绝可发布路径中的私有文件和符号链接/junction；开发服务器按白名单提供文件。发现异常应修复原因，不要关闭保护。
+- 构建会拒绝可发布路径中的私有文件和符号链接/junction；开发服务器只按白名单提供文件。发现异常应修复原因，不要关闭保护。
 
 ## 协作与文件归属
 
 本仓库可能在共享工作树中由多个 agent 协作。每个独立功能单独指派一个子 agent，并给出明确的文件清单和验收标准；不要把同一文件同时交给多个 agent。
 
 - 子 agent 只改自己负责的文件；需要共享文件时先问其 owner 或主 agent，不得跨范围修改。
-- 不要 reset、checkout 或覆盖用户及其他 agent 的改动；不要删除不认识的用户数据。`tools/model-config.yaml` 必须保持本地、被忽略；仅本机模型适配器在运行时读取，人和 agent 不得读取、打印、复制或提交它。
+- 不要 reset、checkout 或覆盖用户及其他 agent 的改动；不要删除不认识的用户数据。`tools/config.yaml` 必须保持本地、被忽略；仅本机模型适配器在运行时读取，人和 agent 不得读取、打印、复制或提交它。
 - 子 agent 不在中途运行 build、test、lint 或 format；所有改动落地后由主 agent 统一验收并报告真实结果。
 - 功能拆分为可独立验收的小块；新功能要有对应行为测试，测试放在 `tools/` 并与实现同目录。
 - 结构和命令变化时同步更新三份 README；本 README 是唯一开发入口，不要创建平行的开发说明。
@@ -232,6 +257,7 @@ pnpm docs:preview
 推送到 `main` 会触发 `.github/workflows/static.yml`，安装依赖、构建站点并把 `docs/.vitepress/dist` 部署到 GitHub Pages。仓库 Pages 的发布来源必须设为 **GitHub Actions**。
 
 - workflow 只运行安装、构建和部署，不运行模型检查，也不持有任何模型凭据。
-- 生产构建始终关闭 AI 搜索，即使 `ai-search.config.json` 在本机为 `true`。
+- 生产构建始终关闭 AI 搜索，即使 `config.json` 在本机为 `true`。
 - 发布前确认检查通过、工作树中没有私有文件、没有未审阅的翻译覆盖。
-- 部署后抽查三个版本的页面、导航、字体、公式和图表；站点不应请求非本站运行时资源。
+- 部署后等 workflow 完成，再抽查三个版本的页面、导航、字体、公式和图表；站点不应请求非本站运行时资源。
+- 然后用全新的浏览器配置和空缓存执行冷缓存测试，并报告真实结果；不得承诺或伪造固定加载时间。

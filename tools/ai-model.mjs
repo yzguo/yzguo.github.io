@@ -11,13 +11,13 @@ const here = path.dirname(fileURLToPath(import.meta.url))
 const repositoryRoot = path.resolve(here, '..')
 const repositoryDocsPath = path.join(repositoryRoot, 'docs')
 
-export const AI_MODEL_CONFIG_PATH = path.join(here, 'model-config.yaml')
+export const TOOL_CONFIG_PATH = path.join(here, 'config.yaml')
 export const DEFAULT_TIMEOUT_MS = 300_000
 export const DEFAULT_MAX_OUTPUT_TOKENS = 16_384
 
-const DOCS_CONFIG_ERROR = '模型配置文件不能位于站点的 docs 目录'
+const DOCS_CONFIG_ERROR = '工具配置文件不能位于站点的 docs 目录'
 const UNSAFE_REPOSITORY_CONFIG_ERROR =
-  '模型配置文件必须位于仓库外，或使用仓库内已忽略的 tools/model-config.yaml、tools/model-config.yml、tools/model-config.json、tools/*.key、tools/*.pem、tools/*.secret.*、tools/*.private.*、tools/*.local.*、tools/.env*，或根目录 .env/.env.*（.env.example 除外）'
+  '工具配置文件必须位于仓库外，或使用仓库内已忽略的 tools/config.yaml、tools/*.key、tools/*.pem、tools/*.secret.*、tools/*.private.*、tools/*.local.*、tools/.env*，或根目录 .env/.env.*（.env.example 除外）'
 
 const MAX_TIMEOUT_MS = 2_147_483_647
 const MAX_CONFIG_BYTES = 1024 * 1024
@@ -138,9 +138,7 @@ function isAllowedRepositoryConfigRelative(relative) {
   if (!fileName || fileName.includes('/')) return false
   return fileName === '.env'
     || fileName.startsWith('.env.')
-    || fileName === 'model-config.yaml'
-    || fileName === 'model-config.yml'
-    || fileName === 'model-config.json'
+    || fileName === 'config.yaml'
     || fileName.endsWith('.key')
     || fileName.endsWith('.pem')
     || /^.+\.secret\..+$/.test(fileName)
@@ -172,7 +170,7 @@ async function canonicalizeConfigPath(absolutePath) {
     // Only a missing file is safe to resolve through its parent. Any other
     // resolution failure fails closed instead of reading an unresolved path.
     if (error?.code !== 'ENOENT') {
-      throw configError(`无法读取模型配置文件${readErrorLabel(error?.code)}`)
+      throw configError(`无法读取工具配置文件${readErrorLabel(error?.code)}`)
     }
     const parent = path.dirname(absolutePath)
     let realParent
@@ -180,7 +178,7 @@ async function canonicalizeConfigPath(absolutePath) {
       realParent = await realpath(parent)
     } catch (parentError) {
       if (parentError?.code !== 'ENOENT') {
-        throw configError(`无法读取模型配置文件${readErrorLabel(parentError?.code)}`)
+        throw configError(`无法读取工具配置文件${readErrorLabel(parentError?.code)}`)
       }
       realParent = parent
     }
@@ -190,7 +188,7 @@ async function canonicalizeConfigPath(absolutePath) {
 
 async function resolveConfigPath(configPath) {
   const requested = path.resolve(
-    configPath ?? envValue('AI_MODEL_CONFIG') ?? AI_MODEL_CONFIG_PATH
+    configPath ?? envValue('AI_MODEL_CONFIG') ?? TOOL_CONFIG_PATH
   )
   const repositoryRoots = [repositoryRoot]
   const docsPaths = [repositoryDocsPath]
@@ -224,23 +222,23 @@ async function readConfigText(configPath) {
     text = await readFile(configPath, 'utf8')
   } catch (error) {
     if (error?.code === 'ENOENT') {
-      throw configError('模型配置文件不存在')
+      throw configError('工具配置文件不存在')
     }
     if (error?.code === 'EACCES' || error?.code === 'EPERM') {
-      throw configError('无法读取模型配置文件（权限不足）')
+      throw configError('无法读取工具配置文件（权限不足）')
     }
     // Report only a fixed category and an optional error code, never a path.
-    throw configError(`无法读取模型配置文件${readErrorLabel(error?.code)}`)
+    throw configError(`无法读取工具配置文件${readErrorLabel(error?.code)}`)
   }
   if (Buffer.byteLength(text, 'utf8') > MAX_CONFIG_BYTES) {
-    throw configError('模型配置文件过大')
+    throw configError('工具配置文件过大')
   }
   return text
 }
 
 function parseConfigText(text, configPath) {
   const trimmed = text.trim()
-  if (!trimmed) throw configError('模型配置文件为空')
+  if (!trimmed) throw configError('工具配置文件为空')
 
   const looksLikeJson = /\.json$/i.test(configPath) || trimmed.startsWith('{')
   let parsed
@@ -249,7 +247,7 @@ function parseConfigText(text, configPath) {
       parsed = JSON.parse(trimmed)
     } catch {
       // Never include the parser's excerpt: it can contain the private key.
-      throw configError('模型配置文件不是有效的 JSON')
+      throw configError('工具配置文件不是有效的 JSON')
     }
   } else {
     try {
@@ -259,14 +257,14 @@ function parseConfigText(text, configPath) {
         ? `（第 ${error.linePos[0].line} 行）`
         : ''
       // Never include the parser's source excerpt: it can contain the key.
-      throw configError(`模型配置文件不是有效的 YAML${line}`)
+      throw configError(`工具配置文件不是有效的 YAML${line}`)
     }
   }
   if (!isPlainObject(parsed)) throw configError('模型配置必须是对象')
   return parsed
 }
 
-function selectProvider(config, requestedProvider) {
+function selectProvider(config, requestedProvider, configuredProvider) {
   const providers = config.providers
   if (!isPlainObject(providers) || Object.keys(providers).length === 0) {
     throw configError('模型配置缺少 providers')
@@ -277,6 +275,10 @@ function selectProvider(config, requestedProvider) {
     name = names.find((candidate) => candidate === requestedProvider)
       ?? names.find((candidate) => candidate.toLowerCase() === requestedProvider.toLowerCase())
     if (!name) throw configError('未找到指定的模型提供方')
+  } else if (configuredProvider !== undefined) {
+    name = names.find((candidate) => candidate === configuredProvider)
+      ?? names.find((candidate) => candidate.toLowerCase() === configuredProvider.toLowerCase())
+    if (!name) throw configError('未找到配置中指定的模型提供方')
   } else {
     name = names.includes('ustc') ? 'ustc' : names[0]
   }
@@ -385,9 +387,24 @@ function selectModel(models, requestedModel) {
 async function loadModelConfig(options = {}) {
   const configPath = await resolveConfigPath(options.configPath)
   const config = parseConfigText(await readConfigText(configPath), configPath)
+  const configuredProvider = config.provider === undefined
+    ? undefined
+    : configString(config.provider, 'provider')
+  const configuredModel = config.model === undefined
+    ? undefined
+    : configString(config.model, 'model')
+  const defaultTimeoutMs = optionalPositiveInteger(config.timeoutMs, 'timeoutMs')
+  if (defaultTimeoutMs !== null && defaultTimeoutMs > MAX_TIMEOUT_MS) {
+    throw configError(`timeoutMs 不能大于 ${MAX_TIMEOUT_MS}`)
+  }
+  const defaultMaxOutputTokens = optionalPositiveInteger(
+    config.maxOutputTokens,
+    'maxOutputTokens'
+  )
   const { name: providerName, provider } = selectProvider(
     config,
-    options.provider ?? envValue('AI_MODEL_PROVIDER')
+    options.provider ?? envValue('AI_MODEL_PROVIDER'),
+    configuredProvider
   )
 
   if (!acceptedApis.has(provider.api)) {
@@ -414,7 +431,10 @@ async function loadModelConfig(options = {}) {
   })
 
   const baseUrl = normalizeBaseUrl(provider.baseUrl)
-  const model = selectModel(models, options.model ?? envValue('AI_MODEL'))
+  const model = selectModel(
+    models,
+    options.model ?? envValue('AI_MODEL') ?? configuredModel
+  )
 
   return {
     provider: providerName,
@@ -423,7 +443,9 @@ async function loadModelConfig(options = {}) {
     endpoint: buildEndpoint(baseUrl),
     apiKey: apiKey.trim(),
     model,
-    models
+    models,
+    defaultTimeoutMs,
+    defaultMaxOutputTokens
   }
 }
 
@@ -439,7 +461,8 @@ function publicModel(model) {
 }
 
 /**
- * Returns non-sensitive provider/model metadata for CLIs and local UI code.
+ * Returns non-sensitive provider/model metadata for CLIs and local UI code,
+ * including the effective default request timeout and output limit.
  * The API key is never part of the returned object.
  */
 export async function getModelInfo(options = {}) {
@@ -458,6 +481,8 @@ export async function getModelInfo(options = {}) {
     provider: loaded.provider,
     api: loaded.api,
     endpoint: loaded.endpoint,
+    timeoutMs: loaded.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS,
+    maxOutputTokens: loaded.defaultMaxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
     model: publicModel(loaded.model),
     models: loaded.models.map(publicModel)
   }
@@ -649,7 +674,7 @@ function assertSignal(signal) {
   }
 }
 
-function resolveTimeoutMs(value) {
+function resolveTimeoutMs(value, fallback = DEFAULT_TIMEOUT_MS) {
   let resolved = value
   if (resolved === undefined) {
     const raw = process.env.AI_REQUEST_TIMEOUT_MS
@@ -660,7 +685,7 @@ function resolveTimeoutMs(value) {
       resolved = Number(raw)
     }
   }
-  if (resolved === undefined) resolved = DEFAULT_TIMEOUT_MS
+  if (resolved === undefined) resolved = fallback
   if (!Number.isSafeInteger(resolved) || resolved < 1 || resolved > MAX_TIMEOUT_MS) {
     throw new TypeError('timeoutMs 必须是 1 到 2147483647 之间的整数')
   }
@@ -669,6 +694,11 @@ function resolveTimeoutMs(value) {
 
 /**
  * Requests one assistant reply from the configured OpenAI-compatible endpoint.
+ *
+ * `timeoutMs` and `maxOutputTokens` fall back to `AI_REQUEST_TIMEOUT_MS` and
+ * the private configuration's `timeoutMs`/`maxOutputTokens`, then to the
+ * built-in defaults. `model` and `provider` similarly fall back to `AI_MODEL`,
+ * `AI_MODEL_PROVIDER`, and the configuration defaults.
  *
  * @param {object} options
  * @param {string} [options.system]
@@ -692,7 +722,7 @@ export async function requestModel(options = {}) {
     model: requestedModel,
     provider: requestedProvider,
     configPath,
-    maxOutputTokens = DEFAULT_MAX_OUTPUT_TOKENS,
+    maxOutputTokens,
     maxPromptBytes,
     maxResponseBytes = DEFAULT_MAX_RESPONSE_BYTES,
     fetchImpl = globalThis.fetch
@@ -712,19 +742,26 @@ export async function requestModel(options = {}) {
     }
   }
   if (typeof fetchImpl !== 'function') throw new TypeError('fetchImpl 必须是函数')
-  requirePositiveInteger(maxOutputTokens, 'maxOutputTokens')
   const responseLimit = requirePositiveInteger(maxResponseBytes, 'maxResponseBytes')
   if (maxPromptBytes !== undefined) requirePositiveInteger(maxPromptBytes, 'maxPromptBytes')
-  const timeout = resolveTimeoutMs(timeoutMs)
   assertSignal(signal)
   if (signal?.aborted) throw abortError()
 
   const loaded = await loadModelConfig({ configPath, provider: requestedProvider, model: requestedModel })
   if (signal?.aborted) throw abortError()
 
+  const timeout = resolveTimeoutMs(
+    timeoutMs,
+    loaded.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS
+  )
+  const requestedOutputTokens = maxOutputTokens
+    ?? loaded.defaultMaxOutputTokens
+    ?? DEFAULT_MAX_OUTPUT_TOKENS
+  requirePositiveInteger(requestedOutputTokens, 'maxOutputTokens')
+
   const effectiveOutputTokens = loaded.model.maxTokens === null
-    ? maxOutputTokens
-    : Math.min(maxOutputTokens, loaded.model.maxTokens)
+    ? requestedOutputTokens
+    : Math.min(requestedOutputTokens, loaded.model.maxTokens)
   if (
     loaded.model.contextWindow !== null &&
     effectiveOutputTokens >= loaded.model.contextWindow

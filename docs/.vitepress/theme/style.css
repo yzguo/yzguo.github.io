@@ -3,28 +3,47 @@
  *
  * Fonts are all served from this origin (see the @font-face declarations in
  * ./fonts). The order matters and is intentional:
- *   1. Noto Sans SC Latin - Latin script body/navigation text. It is built from
- *                            the same local Noto Sans SC variable slices as the
- *                            CJK face below, so English and Chinese share one
- *                            typeface.
+ *   1. Noto Sans SC Latin - one consolidated Latin face carrying the text,
+ *                            punctuation, language-menu labels and text
+ *                            symbols of every page. English uses only this
+ *                            face; Chinese and English share one typeface.
  *   2. Symbols Nerd Font   - private-use and legacy icon glyphs only.
  *   3. Noto Emoji          - monochrome default-presentation emoji.
  *   4. Twemoji Mozilla     - local color fallback for VS16 emoji and keycaps.
- *   5. Noto Sans SC        - CJK, kana, Hangul, fullwidth forms and symbols.
+ *   5. Site CJK face       - one consolidated CN or TW variable file for the
+ *                            locale's content, followed by the fine-grained
+ *                            local fallback slices for future/rare glyphs.
  * No CDN URLs or system font names are used, so the rendered typography does
  * not depend on fonts installed on the visitor's machine.
  *
+ * The common and locale font paths preloaded by ../head.ts and the family
+ * names declared in ./fonts/noto-sans-sc.css must stay in sync with this
+ * stack.
+ *
  * VitePress' base theme declares --vp-font-family-base on :root. The
- * :root[lang] selector below deliberately outranks that declaration for both
- * the English and Chinese locales.
+ * :root[lang] selector below deliberately outranks that declaration for every
+ * locale. The CN/TW overrides come after the base rule and bind one locale to
+ * exactly one consolidated CJK family: a zh-CN page never downloads the TW
+ * file (and vice versa). English keeps only the generic fallback family, so
+ * its normal text requests the Latin face and future CJK content (if any)
+ * falls back to the fine-grained local slices.
  */
 :root[lang] {
+  --site-cjk-font: 'Noto Sans SC';
   --vp-font-family-base:
     'Noto Sans SC Latin', 'Symbols Nerd Font', 'Noto Emoji', 'Twemoji Mozilla',
-    'Noto Sans SC';
+    var(--site-cjk-font);
   --vp-font-family-mono:
     'Latin Modern Mono', 'Symbols Nerd Font', 'Noto Emoji', 'Twemoji Mozilla',
-    'Noto Sans SC';
+    var(--site-cjk-font);
+}
+
+:root[lang='zh-CN'] {
+  --site-cjk-font: 'Noto Sans SC CN', 'Noto Sans SC';
+}
+
+:root[lang='zh-TW'] {
+  --site-cjk-font: 'Noto Sans SC TW', 'Noto Sans SC';
 }
 
 /*
