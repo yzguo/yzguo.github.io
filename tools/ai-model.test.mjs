@@ -197,6 +197,210 @@ test('model selection accepts an id, a display name, and the default', async (t)
   )
 })
 
+test('flat configuration uses the explicit base URL and default API type', async (t) => {
+  const configPath = await writeConfig(t, stringifyYaml({
+    baseUrl: BASE_URL,
+    apiKey: SECRET,
+    model: 'model-a'
+  }))
+
+  const info = await getModelInfo({ configPath })
+  assert.equal(info.provider, 'default')
+  assert.equal(info.api, 'openai-completions')
+  assert.equal(info.endpoint, `${BASE_URL}/chat/completions`)
+  assert.equal(info.timeoutMs, DEFAULT_TIMEOUT_MS)
+  assert.equal(info.maxOutputTokens, DEFAULT_MAX_OUTPUT_TOKENS)
+  assert.equal(info.model.id, 'model-a')
+  assert.equal(info.model.name, 'model-a')
+  assert.equal(info.model.contextWindow, null)
+  assert.equal(info.model.maxTokens, null)
+  assert.deepEqual(info.model.input, [])
+  assert.equal(info.model.reasoningEffort, 'none')
+  assert.equal(info.models.length, 1)
+  assert.ok(!JSON.stringify(info).includes(SECRET))
+  assert.ok(!JSON.stringify(info).includes('apiKey'))
+
+  const { fetchImpl, calls } = recordingFetch(() => jsonResponse(completion()))
+  const result = await requestModel({ configPath, prompt: 'hello', fetchImpl })
+  assert.equal(result, 'translated text')
+  assert.equal(calls[0].url, `${BASE_URL}/chat/completions`)
+  assert.equal(calls[0].init.headers.authorization, `Bearer ${SECRET}`)
+  assert.deepEqual(calls[0].body, {
+    model: 'model-a',
+    messages: [{ role: 'user', content: 'hello' }],
+    max_tokens: DEFAULT_MAX_OUTPUT_TOKENS,
+    reasoning_effort: 'none'
+  })
+})
+
+test('flat configuration requires an explicit base URL', async (t) => {
+  const configPath = await writeConfig(t, stringifyYaml({
+    apiKey: SECRET,
+    model: 'model-a'
+  }))
+
+  await assert.rejects(
+    getModelInfo({ configPath }),
+    (error) => {
+      assert.equal(error.code, 'MODEL_CONFIG_ERROR')
+      assert.match(error.message, /baseUrl/)
+      assertNoSecret(error.message)
+      return true
+    }
+  )
+})
+
+test('flat configuration accepts optional API type, limits, and timeouts', async (t) => {
+  const configPath = await writeConfig(t, stringifyYaml({
+    apiKey: SECRET,
+    baseUrl: BASE_URL,
+    api: 'openai-compatible',
+    model: 'model-b',
+    timeoutMs: 25,
+    maxOutputTokens: 64,
+    contextWindow: 32_768,
+    maxTokens: 4_096,
+    reasoningEffort: 'low'
+  }))
+
+  const info = await getModelInfo({ configPath })
+  assert.equal(info.provider, 'default')
+  assert.equal(info.api, 'openai-compatible')
+  assert.equal(info.endpoint, `${BASE_URL}/chat/completions`)
+  assert.equal(info.timeoutMs, 25)
+  assert.equal(info.maxOutputTokens, 64)
+  assert.equal(info.model.id, 'model-b')
+  assert.equal(info.model.contextWindow, 32_768)
+  assert.equal(info.model.maxTokens, 4_096)
+  assert.equal(info.model.reasoningEffort, 'low')
+  assert.ok(!JSON.stringify(info).includes(SECRET))
+
+  const fromOption = await getModelInfo({ configPath, model: 'MODEL-B' })
+  assert.equal(fromOption.model.id, 'model-b')
+  await assert.rejects(
+    getModelInfo({ configPath, model: 'model-a' }),
+    (error) => {
+      assert.equal(error.code, 'MODEL_CONFIG_ERROR')
+      assert.match(error.message, /未找到指定的模型/)
+      assertNoSecret(error.message)
+      return true
+    }
+  )
+
+  const { fetchImpl, calls } = recordingFetch(() =>
+    jsonResponse(completion({ model: 'model-b' }))
+  )
+  await requestModel({ configPath, prompt: 'hello', fetchImpl })
+  assert.equal(calls[0].body.max_tokens, 64)
+  assert.equal(calls[0].body.reasoning_effort, 'low')
+})
+
+test('flat configuration supports a provider name and multi-model catalog', async (t) => {
+  const configPath = await writeConfig(t, stringifyYaml({
+    provider: 'local',
+    baseUrl: BASE_URL,
+    apiKey: SECRET,
+    reasoningEffort: 'low',
+    model: 'Model B',
+    models: [
+      MODEL_A,
+      { ...MODEL_B, reasoningEffort: 'high' }
+    ]
+  }))
+
+  const info = await getModelInfo({ configPath })
+  assert.equal(info.provider, 'local')
+  assert.equal(info.api, 'openai-completions')
+  assert.equal(info.model.id, 'model-b')
+  assert.equal(info.model.reasoningEffort, 'high')
+  assert.deepEqual(info.models.map((model) => model.id), ['model-a', 'model-b'])
+  assert.deepEqual(info.models[0], { ...MODEL_A, reasoningEffort: 'low' })
+  assert.deepEqual(info.models[1], { ...MODEL_B, reasoningEffort: 'high' })
+  assert.ok(!JSON.stringify(info).includes(SECRET))
+
+  const first = await getModelInfo({ configPath, model: 'model-a' })
+  assert.equal(first.model.id, 'model-a')
+  assert.equal(first.model.reasoningEffort, 'low')
+  const byName = await getModelInfo({ configPath, model: 'Model B' })
+  assert.equal(byName.model.id, 'model-b')
+  await assert.rejects(
+    getModelInfo({ configPath, model: 'missing-model' }),
+    (error) => error.code === 'MODEL_CONFIG_ERROR' && /未找到指定的模型/.test(error.message)
+  )
+})
+
+test('flat configuration defaults multi-model selection to the first model', async (t) => {
+  const configPath = await writeConfig(t, stringifyYaml({
+    baseUrl: BASE_URL,
+    apiKey: SECRET,
+    models: [MODEL_B, MODEL_A]
+  }))
+
+  const info = await getModelInfo({ configPath })
+  assert.equal(info.provider, 'default')
+  assert.equal(info.model.id, 'model-b')
+  assert.equal(info.models.length, 2)
+  assert.ok(!JSON.stringify(info).includes(SECRET))
+})
+
+test('flat configuration rejects unknown fields, missing values, and invalid limits', async (t) => {
+  const cases = [
+    [{ apiKey: SECRET }, /baseUrl/],
+    [{ baseUrl: BASE_URL, model: 'model-a' }, /apiKey/],
+    [{ apiKey: SECRET, model: 'model-a' }, /baseUrl/],
+    [{ apiKey: SECRET, baseUrl: BASE_URL }, /model/],
+    [{ apiKey: SECRET, baseUrl: BASE_URL, models: [] }, /models/],
+    [{ apiKey: SECRET, baseUrl: BASE_URL, models: [MODEL_A, MODEL_A] }, /重复/],
+    [{ apiKey: SECRET, baseUrl: BASE_URL, models: [MODEL_A], contextWindow: 1_000 }, /contextWindow/],
+    [{ apiKey: SECRET, baseUrl: BASE_URL, model: 'model-a', extra: true }, /不支持的字段/],
+    [{ apiKey: SECRET, baseUrl: BASE_URL, model: 'model-a', performance: {} }, /不支持的字段/],
+    [{ apiKey: SECRET, baseUrl: 'http://model.example/v1', model: 'model-a' }, /HTTPS/],
+    [{ apiKey: SECRET, baseUrl: BASE_URL, model: 'model-a', api: 'anthropic-messages' }, /openai-completions/],
+    [{ apiKey: SECRET, baseUrl: BASE_URL, model: 'model-a', contextWindow: 1_000, maxTokens: 2_000 }, /contextWindow/],
+    [{ apiKey: SECRET, baseUrl: BASE_URL, model: 'model-a', contextWindow: 0 }, /contextWindow/],
+    [{ apiKey: '', baseUrl: BASE_URL, model: 'model-a' }, /apiKey/],
+    [{ apiKey: `${SECRET}\nleak`, baseUrl: BASE_URL, model: 'model-a' }, /apiKey/],
+    [{ apiKey: SECRET, baseUrl: BASE_URL, model: 'model-a', timeoutMs: 0 }, /timeoutMs/],
+    [{ apiKey: SECRET, baseUrl: BASE_URL, model: 'model-a', reasoningEffort: 'extreme' }, /reasoningEffort/]
+  ]
+
+  for (const [config, pattern] of cases) {
+    const configPath = await writeConfig(t, stringifyYaml(config))
+    await assert.rejects(
+      getModelInfo({ configPath }),
+      (error) => {
+        assert.equal(error.code, 'MODEL_CONFIG_ERROR')
+        assert.match(error.message, pattern)
+        assertNoSecret(error.message)
+        return true
+      }
+    )
+  }
+})
+
+test('multi-provider configuration defaults the API type and first provider', async (t) => {
+  const configPath = await writeConfig(t, stringifyYaml({
+    providers: {
+      alpha: {
+        baseUrl: BASE_URL,
+        apiKey: SECRET,
+        models: [MODEL_A]
+      },
+      beta: {
+        baseUrl: BASE_URL,
+        apiKey: SECRET,
+        models: [MODEL_B]
+      }
+    }
+  }))
+
+  const info = await getModelInfo({ configPath })
+  assert.equal(info.provider, 'alpha')
+  assert.equal(info.api, 'openai-completions')
+  assert.equal(info.model.id, 'model-a')
+  assert.ok(!JSON.stringify(info).includes(SECRET))
+})
+
 test('top-level provider and model choose defaults, with env and options overriding', async (t) => {
   const configPath = await writeConfig(t, stringifyYaml({
     provider: 'beta',

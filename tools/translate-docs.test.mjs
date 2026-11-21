@@ -5,14 +5,13 @@ import path from 'node:path'
 import test from 'node:test'
 import { getMarkdownParser, maskMarkdown } from './markdown-safety.mjs'
 import { parseFrontmatterScalars } from './document-model.mjs'
-import { findSimplifiedText } from './traditional-chinese.mjs'
+import { convertTextToTraditional, findSimplifiedText } from './traditional-chinese.mjs'
 import {
   collectTranslationSources,
   main,
   segmentMarkdown,
   translateFrontmatter,
   translateSource,
-  translateTraditionalSource,
   writeTranslationsAtomically
 } from './translate-docs.mjs'
 
@@ -39,6 +38,26 @@ const dictionary = new Map([
   ['周期 T', 'Period T']
 ])
 
+function translateEnglishValue(value, replaceAllEntries = false) {
+  let translated = value
+  for (const [chinese, english] of dictionary) {
+    if (!translated.includes(chinese)) continue
+    if (!replaceAllEntries) return translated.replaceAll(chinese, english)
+    translated = translated.replaceAll(chinese, english)
+  }
+  return translated
+}
+
+function translateModelValue(value, target, replaceAllEntries = false) {
+  return target === 'zh-tw'
+    ? convertTextToTraditional(value)
+    : translateEnglishValue(value, replaceAllEntries)
+}
+
+function promptTarget(prompt) {
+  return prompt.includes('Traditional Chinese (Taiwan)') ? 'zh-tw' : 'en'
+}
+
 function fakeModel(options = {}) {
   const prompts = []
   async function requestModel({ system, prompt }) {
@@ -53,31 +72,24 @@ function fakeModel(options = {}) {
       if (!match) throw new Error('missing frontmatter values')
       const values = JSON.parse(match[1])
       if (options.frontmatterResponse) return options.frontmatterResponse(values)
-      return JSON.stringify(values.map((value) => {
-        for (const [chinese, english] of dictionary) {
-          if (value.includes(chinese)) return value.replaceAll(chinese, english)
-        }
-        return value
-      }))
+      const target = promptTarget(prompt)
+      return JSON.stringify(values.map((value) => translateModelValue(value, target)))
     }
-    if (prompt.includes('Translate each Chinese reader-visible label in this Mermaid')) {
+    if (prompt.includes('<<<MERMAID LABELS')) {
       if (options.mermaidError) throw new Error(options.mermaidError)
       const match = prompt.match(/<<<MERMAID LABELS [^>]+>>>\n([\s\S]*?)\n<<<END/)
       if (!match) throw new Error('missing Mermaid labels')
       const values = JSON.parse(match[1])
       if (options.mermaidResponse) return options.mermaidResponse(values)
-      return JSON.stringify(values.map((value) => {
-        for (const [chinese, english] of dictionary) {
-          if (value.includes(chinese)) return value.replaceAll(chinese, english)
-        }
-        return value
-      }))
+      const target = promptTarget(prompt)
+      return JSON.stringify(values.map((value) => translateModelValue(value, target)))
     }
     if (prompt.includes('<<<TEXT FRAGMENTS')) {
       if (options.bodyError) throw new Error(options.bodyError)
       const match = prompt.match(/<<<TEXT FRAGMENTS [^>]+>>>\n([\s\S]*?)\n<<<END/)
       if (!match) throw new Error('missing text fragments')
       const segments = JSON.parse(match[1])
+      const target = promptTarget(prompt)
       const translated = []
       for (const segment of segments) {
         for (const fragment of segment.fragments) {
@@ -87,9 +99,7 @@ function fakeModel(options = {}) {
           } else if (options.bodyResponse) {
             text = options.bodyResponse(text)
           } else {
-            for (const [chinese, english] of dictionary) {
-              text = text.replaceAll(chinese, english)
-            }
+            text = translateModelValue(text, target, true)
           }
           translated.push({ id: fragment.id, text })
         }
@@ -543,7 +553,7 @@ test('missing fragment responses and semantic mismatches fail without writing', 
   )
 })
 
-test('Traditional translation is real conversion and preserves protected content', async (t) => {
+test('Traditional model translation preserves protected content and never sends private notes', async (t) => {
   const source = [
     '---',
     'title: 标题',
@@ -573,13 +583,19 @@ test('Traditional translation is real conversion and preserves protected content
   ].join('\n')
   const rootDir = await makeProject(t, { 'docs/zh-cn/index.md': source })
   const md = await parserFor(rootDir)
-  const traditional = await translateTraditionalSource({
+  const { requestModel, prompts } = fakeModel()
+  const traditional = await translateSource({
     sourcePath: 'docs/zh-cn/index.md',
     targetPath: 'docs/zh-tw/index.md',
     sourceText: source,
+    targetLocale: 'zh-tw',
+    requestModel,
     md
   })
 
+  assert.ok(prompts.length > 0)
+  assert.ok(prompts.some((entry) => entry.prompt.includes('Traditional Chinese (Taiwan)')))
+  assert.doesNotMatch(prompts.map((entry) => entry.prompt).join('\n'), /私密注记/)
   assert.notEqual(traditional, source)
   assert.match(traditional, /title: 標題/)
   assert.match(traditional, /link: \/zh-tw\/Notes\//)
@@ -665,7 +681,7 @@ test('force is required to replace manual targets and only works with write', as
   assert.match(await readFile(path.join(rootDir, 'README.zh-TW.md'), 'utf8'), /# 中文說明/)
 })
 
-test('--lang limits generation and Traditional conversion needs no model', async (t) => {
+test('--lang limits generation and Traditional also uses the model', async (t) => {
   const rootDir = await makeProject(t, {
     'docs/zh-cn/index.md': '# 标题\n\n欢迎。\n'
   })
@@ -680,7 +696,8 @@ test('--lang limits generation and Traditional conversion needs no model', async
 
   assert.equal(code, 0)
   assert.deepEqual(errors, [])
-  assert.equal(prompts.length, 0, 'Traditional conversion must not call the model')
+  assert.ok(prompts.length > 0, 'Traditional generation must call the model')
+  assert.ok(prompts.some((entry) => entry.prompt.includes('Traditional Chinese (Taiwan)')))
   await assert.rejects(readFile(path.join(rootDir, 'docs/en/index.md'), 'utf8'), { code: 'ENOENT' })
   assert.match(await readFile(path.join(rootDir, 'docs/zh-tw/index.md'), 'utf8'), /# 標題/)
 })

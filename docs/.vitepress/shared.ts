@@ -2,6 +2,14 @@ import { defineConfig } from 'vitepress'
 
 export const shared = defineConfig({
     title: 'Yanzhen Guo',
+    /*
+     * Explicitly keep VitePress's default appearance contract: the first visit
+     * follows `prefers-color-scheme`, the dark class is applied in <head>
+     * before paint, OS changes update an automatic choice, and the nav switch
+     * stores a manual choice in localStorage. Do not override this with
+     * `false`, `force-dark`, or `force-auto`.
+     */
+    appearance: true,
     metaChunk: true,
     lastUpdated: true,
     themeConfig: {

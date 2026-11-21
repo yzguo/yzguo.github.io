@@ -45,11 +45,11 @@ assertPrivateModelConfigPlacement({
 
 /*
  * The root `config.json` is the only source of public feature switches:
- * `aiSearch.enabled` and `performance.prefetchLinks`. It is read only by this
- * config file; the browser receives only the resolved
- * `__AI_SEARCH_ENABLED__` boolean and the VitePress router option, never the
- * config object or any server setting. Unknown fields are rejected so private
- * provider configuration cannot enter a published file.
+ * flat booleans `aiSearch` and `prefetchLinks`, both optional and defaulting
+ * to `false`. It is read only by this config file; the browser receives only
+ * the resolved `__AI_SEARCH_ENABLED__` boolean and the VitePress router
+ * option, never the config object or any server setting. Unknown fields are
+ * rejected so private provider configuration cannot enter a published file.
  *
  * - Development (`command === 'serve'`) honours the AI switch.
  * - Production (`command === 'build'`) is always disabled. GitHub Pages is
@@ -164,22 +164,29 @@ function languageEntryPlugin(): Plugin {
  * package as separate lazy chunks. Do not add a catch-all Mermaid group: it
  * would merge diagram-only code and make unrelated renderers load together.
  *
- * @mermaid-js/parser ships its Langium/Chevrotain/VSCode dependency graph as
- * one pre-bundled module. Rolldown splits only between modules, so that single
- * lazy module cannot be reduced without patching the dependency. Its build
- * warning is left visible; chunkSizeWarningLimit and warning filters are not
+ * The remaining >500 kB warning is upstream, not a local packing choice.
+ * @mermaid-js/parser@1.2.1 (required by mermaid@11.17.2) ships its Langium,
+ * Chevrotain, VSCode JSON-RPC/LSP, and lodash dependency graph as one
+ * self-contained 1,319,809-byte module with no external imports. Rolldown can
+ * split only between modules, so the build minifies that module into one
+ * 662,087-byte lazy chunk. Moving to parser@2.0.1 does not help: its common
+ * module is still 1,209,571 bytes (631,715 bytes in the package's own minified
+ * build), above the 500 kB limit. Reducing it requires an upstream parser
+ * build that emits the shared dependency graph as multiple modules; a
+ * downstream split would be a vendored dependency patch. The warning is
+ * therefore left visible; chunkSizeWarningLimit and warning filters are not
  * changed.
  */
 export default defineConfig({
     ...shared,
     ...headConfig,
     /*
-     * `performance.prefetchLinks` is off by default so a cold first paint does
-     * not fetch other pages, including the other locale homepages. Setting it
-     * to true in the public config restores VitePress's idle-time prefetch.
+     * `prefetchLinks` is off by default so a cold first paint does not fetch
+     * other pages, including the other locale homepages. Setting it to true
+     * in the public config restores VitePress's idle-time prefetch.
      */
     router: {
-        prefetchLinks: siteConfig.performance.prefetchLinks,
+        prefetchLinks: siteConfig.prefetchLinks,
     },
     markdown: {
         math: true,

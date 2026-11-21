@@ -2,4 +2,4 @@
 
 閱讀、練習和小實驗中的紀錄。
 
-- [學習筆記示範](/zh-tw/Notes/Learning/demo) — 解釋稜鏡為什麼能把白光分開的示範筆記。
+<NotesIndex />

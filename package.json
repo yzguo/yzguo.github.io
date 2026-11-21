@@ -17,7 +17,8 @@
     "translate:docs": "node tools/translate-docs.mjs",
     "translate:docs:write": "node tools/translate-docs.mjs --write",
     "translate:docs:force": "node tools/translate-docs.mjs --write --force",
-    "test:multilingual": "node --test tools/check-multilingual.test.mjs tools/document-model.test.mjs tools/markdown-safety.test.mjs tools/traditional-chinese.test.mjs tools/mermaid-translate.test.mjs tools/translate-docs.test.mjs",
+    "content:sync": "node tools/content-sync.mjs",
+    "test:multilingual": "node --test tools/check-multilingual.test.mjs tools/document-model.test.mjs tools/markdown-safety.test.mjs tools/traditional-chinese.test.mjs tools/mermaid-translate.test.mjs tools/translate-docs.test.mjs tools/content-sync.test.mjs",
     "test:tools": "node --test tools/ai-model.test.mjs tools/ai-search.test.mjs"
   },
   "allowScripts": {

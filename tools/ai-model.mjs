@@ -7,6 +7,14 @@ import { parse as parseYaml } from 'yaml'
 // The provider secret is read from an ignored private file and never leaves
 // this process except in the Authorization header of the request itself.
 // No Oh My Pi executable, gateway, login state, or environment is consulted.
+//
+// The private file may use either form:
+// - the short single-provider form: required `baseUrl` and `apiKey`, with
+//   either `model` for a single model or a `models` catalog (plus optional
+//   `model` default selection); optional `provider` name, `api` (default
+//   openai-completions), limits, and timeout;
+// - the multi-provider form: `providers` with one or more named providers and
+//   model catalogs, plus optional default `provider`/`model` selections.
 const here = path.dirname(fileURLToPath(import.meta.url))
 const repositoryRoot = path.resolve(here, '..')
 const repositoryDocsPath = path.join(repositoryRoot, 'docs')
@@ -14,6 +22,9 @@ const repositoryDocsPath = path.join(repositoryRoot, 'docs')
 export const TOOL_CONFIG_PATH = path.join(here, 'config.yaml')
 export const DEFAULT_TIMEOUT_MS = 300_000
 export const DEFAULT_MAX_OUTPUT_TOKENS = 16_384
+
+const DEFAULT_API = 'openai-completions'
+const acceptedApis = new Set([DEFAULT_API, 'openai-compatible'])
 
 const DOCS_CONFIG_ERROR = '工具配置文件不能位于站点的 docs 目录'
 const UNSAFE_REPOSITORY_CONFIG_ERROR =
@@ -28,7 +39,6 @@ const MAX_CONFIG_BYTES = 1024 * 1024
 const DEFAULT_MAX_PROMPT_BYTES = 512 * 1024
 const DEFAULT_MAX_RESPONSE_BYTES = 16 * 1024 * 1024
 const DEFAULT_REASONING_EFFORT = 'none'
-const acceptedApis = new Set(['openai-completions', 'openai-compatible'])
 const acceptedReasoningEfforts = new Set(['none', 'low', 'medium', 'high', 'max'])
 
 function isPlainObject(value) {
@@ -384,6 +394,96 @@ function selectModel(models, requestedModel) {
   return found
 }
 
+const FLAT_CONFIG_FIELDS = new Set([
+  'apiKey',
+  'baseUrl',
+  'api',
+  'provider',
+  'model',
+  'models',
+  'timeoutMs',
+  'maxOutputTokens',
+  'contextWindow',
+  'maxTokens',
+  'reasoningEffort'
+])
+
+function normalizeApi(value) {
+  const api = value === undefined ? DEFAULT_API : value
+  if (!acceptedApis.has(api)) {
+    throw configError('仅支持 openai-completions 模型接口')
+  }
+  return api
+}
+
+function normalizeApiKey(value) {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw configError('模型配置缺少 apiKey')
+  }
+  if (value.length > 8192 || /[\r\n]/.test(value)) {
+    throw configError('模型配置中的 apiKey 无效')
+  }
+  return value.trim()
+}
+
+function buildProviderModels(provider) {
+  if (!Array.isArray(provider.models) || provider.models.length === 0) {
+    throw configError('模型配置缺少 models')
+  }
+  const seenIds = new Set()
+  return provider.models.map((entry, index) => {
+    const model = normalizeModel(entry, index, provider)
+    if (seenIds.has(model.id)) throw configError('模型配置包含重复的 id')
+    seenIds.add(model.id)
+    return model
+  })
+}
+
+/**
+ * The short form keeps one provider's endpoint and credential at the top
+ * level. `baseUrl` is deliberately required: inferring a remote endpoint
+ * could send a real credential to the wrong service. A single model needs
+ * only `model`; a catalog uses `models` (and optionally `model` as the default
+ * selection). `api` defaults to openai-completions. Unknown top-level keys
+ * are rejected so a typo cannot silently change behavior.
+ */
+function buildFlatProvider(config) {
+  for (const key of Object.keys(config)) {
+    if (!FLAT_CONFIG_FIELDS.has(key)) {
+      throw configError('模型配置包含不支持的字段')
+    }
+  }
+
+  const name = config.provider === undefined
+    ? 'default'
+    : configString(config.provider, 'provider')
+  const api = normalizeApi(config.api)
+  const apiKey = normalizeApiKey(config.apiKey)
+  const baseUrl = normalizeBaseUrl(config.baseUrl)
+
+  let models
+  if (config.models === undefined) {
+    const modelId = configString(config.model, 'model')
+    const model = normalizeModel({
+      id: modelId,
+      contextWindow: config.contextWindow,
+      maxTokens: config.maxTokens,
+      reasoningEffort: config.reasoningEffort
+    }, 0, {})
+    models = [model]
+  } else {
+    if (config.contextWindow !== undefined || config.maxTokens !== undefined) {
+      throw configError('models 与顶层 contextWindow/maxTokens 不能同时配置')
+    }
+    models = buildProviderModels({
+      models: config.models,
+      reasoningEffort: config.reasoningEffort
+    })
+  }
+
+  return { name, api, apiKey, baseUrl, models }
+}
+
 async function loadModelConfig(options = {}) {
   const configPath = await resolveConfigPath(options.configPath)
   const config = parseConfigText(await readConfigText(configPath), configPath)
@@ -401,36 +501,33 @@ async function loadModelConfig(options = {}) {
     config.maxOutputTokens,
     'maxOutputTokens'
   )
-  const { name: providerName, provider } = selectProvider(
-    config,
-    options.provider ?? envValue('AI_MODEL_PROVIDER'),
-    configuredProvider
-  )
 
-  if (!acceptedApis.has(provider.api)) {
-    throw configError('仅支持 openai-completions 模型接口')
+  let providerName
+  let api
+  let apiKey
+  let baseUrl
+  let models
+  if (config.providers === undefined) {
+    const flat = buildFlatProvider(config)
+    providerName = flat.name
+    api = flat.api
+    apiKey = flat.apiKey
+    baseUrl = flat.baseUrl
+    models = flat.models
+  } else {
+    const selected = selectProvider(
+      config,
+      options.provider ?? envValue('AI_MODEL_PROVIDER'),
+      configuredProvider
+    )
+    providerName = selected.name
+    const provider = selected.provider
+    api = normalizeApi(provider.api)
+    apiKey = normalizeApiKey(provider.apiKey)
+    baseUrl = normalizeBaseUrl(provider.baseUrl)
+    models = buildProviderModels(provider)
   }
 
-  const apiKey = provider.apiKey
-  if (typeof apiKey !== 'string' || !apiKey.trim()) {
-    throw configError('模型配置缺少 apiKey')
-  }
-  if (apiKey.length > 8192 || /[\r\n]/.test(apiKey)) {
-    throw configError('模型配置中的 apiKey 无效')
-  }
-
-  if (!Array.isArray(provider.models) || provider.models.length === 0) {
-    throw configError('模型配置缺少 models')
-  }
-  const seenIds = new Set()
-  const models = provider.models.map((entry, index) => {
-    const model = normalizeModel(entry, index, provider)
-    if (seenIds.has(model.id)) throw configError('模型配置包含重复的 id')
-    seenIds.add(model.id)
-    return model
-  })
-
-  const baseUrl = normalizeBaseUrl(provider.baseUrl)
   const model = selectModel(
     models,
     options.model ?? envValue('AI_MODEL') ?? configuredModel
@@ -438,10 +535,10 @@ async function loadModelConfig(options = {}) {
 
   return {
     provider: providerName,
-    api: provider.api,
+    api,
     baseUrl,
     endpoint: buildEndpoint(baseUrl),
-    apiKey: apiKey.trim(),
+    apiKey,
     model,
     models,
     defaultTimeoutMs,

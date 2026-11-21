@@ -2,262 +2,125 @@
 
 [English](README.md) | **简体中文** | [繁體中文](README.zh-TW.md)
 
-一个使用 VitePress 构建、以 Markdown 写作、发布在 GitHub Pages 上的个人网站。站点提供英语、简体中文和繁体中文三个版本，三者的结构、事实与内容覆盖一致。本 README 是唯一的开发入口，说明安装、写作、翻译、配置、检查、安全与发布流程。
+这是一个以 Markdown 写作、使用 VitePress 构建、发布在 GitHub Pages 上的个人网站。站点有英语、简体中文和繁体中文三个版本，结构、事实与内容覆盖一致。你只需在 `docs/zh-cn/` 下写简体中文；`pnpm content:sync` 会生成英语和繁体中文版本，导航和侧栏则由内容目录自动生成。不要手工维护三份副本。
 
 - English: <https://yzguo.github.io/en/>
 - 简体中文: <https://yzguo.github.io/zh-cn/>
 - 繁體中文: <https://yzguo.github.io/zh-tw/>
 - 语言入口（自动选择）: <https://yzguo.github.io/>
 
-## 站点架构
+## 快速开始
 
-站点是纯静态 VitePress 项目。每种语言版本位于独立目录，并由对应的公开 URL 提供。所有浏览器运行时资源都由本站同源提供。
-
-```text
-.
-├─ README.md
-├─ README.zh-CN.md
-├─ README.zh-TW.md
-├─ package.json
-├─ config.json
-├─ docs/
-│  ├─ index.md
-│  ├─ en/
-│  ├─ zh-cn/
-│  ├─ zh-tw/
-│  ├─ public/
-│  └─ .vitepress/
-│     ├─ config.mts
-│     ├─ shared.ts
-│     ├─ en-us.ts
-│     ├─ zh-cn.ts
-│     ├─ zh-tw.ts
-│     ├─ head.ts
-│     └─ theme/
-├─ tools/
-└─ .github/workflows/static.yml
-```
-
-`docs/zh-cn/` 是翻译源；`docs/en/` 与 `docs/zh-tw/` 在相同相对路径存放英语和繁体中文版本。`docs/index.md` 是根入口，按浏览器首选语言打开对应版本，不包含正文。`docs/.vitepress/config.mts` 组装三个语言版本；`en-us.ts`、`zh-cn.ts`、`zh-tw.ts` 分别维护可见导航、侧栏和对应语言的界面文案；`shared.ts` 保存三个版本共享的设置，以及 `en`、`zh-cn`、`zh-tw` 三语的本地搜索界面文案。
-
-## 语言路由
-
-根 URL 自动按浏览器首选语言打开对应版本：
-
-- `zh-TW`、`zh-HK`、`zh-MO` 或 `zh-Hant` → `/zh-tw/`
-- 其他 `zh` 语言 → `/zh-cn/`
-- 英语及所有其他语言 → `/en/`
-
-自动选择只在根路径执行，且仅在客户端进行，不使用服务器重定向。浏览器没有可用的语言偏好或禁用 JavaScript 时，站点默认进入英文版。访客无需选择语言，也不会看到语言选择页。启用 JavaScript 时会保留查询字符串和片段；无 JavaScript 的回退不会保留。明确的语言路径（`/en/`、`/zh-cn/`、`/zh-tw/`）和导航菜单中的语言切换保持可用，且不会被覆盖。路由不依赖外部浏览器资源。
-
-## 内容与翻译
-
-简体中文是翻译源：`README.zh-CN.md` 是 `README.md` 和 `README.zh-TW.md` 的源文件，`docs/zh-cn/` 是 `docs/en/` 和 `docs/zh-tw/` 的源文件。
-
-### 路径映射
-
-`/` 是语言入口，自动进入浏览器首选语言对应的版本（`docs/index.md`）。每个内容页在三个版本的 `docs/en/`、`docs/zh-cn/` 或 `docs/zh-tw/` 下各有一份相同相对路径的文件，公开 URL 使用对应前缀。
-
-| 栏目 | 简体中文（源） | 英语 | 繁体中文 |
-| --- | --- | --- | --- |
-| 首页 | `/zh-cn/`（`docs/zh-cn/index.md`） | `/en/`（`docs/en/index.md`） | `/zh-tw/`（`docs/zh-tw/index.md`） |
-| 关于 | `/zh-cn/About/` | `/en/About/` | `/zh-tw/About/` |
-| 项目 | `/zh-cn/Projects/` | `/en/Projects/` | `/zh-tw/Projects/` |
-| 笔记 | `/zh-cn/Notes/` | `/en/Notes/` | `/zh-tw/Notes/` |
-| 笔记页面 | `/zh-cn/Notes/<Category>/<page>` | `/en/Notes/<Category>/<page>` | `/zh-tw/Notes/<Category>/<page>` |
-
-笔记分为课程、学习、工作三类，每类都有索引页和演示页，三种语言保持相同条目和结构。
-
-### 新增或修改页面
-
-三种语言保持相同的相对路径、标题结构、事实、数学、代码和链接语义。
-
-1. 在 `docs/zh-cn/...` 下新增或修改简体中文 Markdown；需要时添加 frontmatter。
-2. 运行 `pnpm translate:docs:write` 生成英语和繁体中文对应页，或直接编辑；审阅每个生成结果。
-3. 在所属分类索引中加入链接；新分类或新顶级栏目要同时更新三个语言版本的导航和侧栏。
-4. 运行一致性检查；标题、代码块、表格、事实、数字、数学和链接目标必须对应。站内链接在各自版本中使用 `/en/`、`/zh-cn/` 或 `/zh-tw/`。
-5. 删除页面时，在同一次修改中删除三个版本的文件及所有链接；未经明确授权，不要删除用户内容。
-
-### 导航与界面文案
-
-三种语言的可见文案和链接结构必须条目数量一致、含义对应；任何版本都不能出现占位文案。
-
-- `docs/.vitepress/en-us.ts`：英文导航、侧栏和英文界面文案。
-- `docs/.vitepress/zh-cn.ts`：简体中文导航、侧栏和界面文案。
-- `docs/.vitepress/zh-tw.ts`：繁体中文导航、侧栏和界面文案。
-- `docs/.vitepress/shared.ts`：三个版本共享的设置，以及 `en`、`zh-cn`、`zh-tw` 三语的本地搜索界面文案；英文文案与 VitePress 默认值一致。
-- `docs/en/index.md`、`docs/zh-cn/index.md` 与 `docs/zh-tw/index.md`：保持对应的 hero 操作和功能卡片。
-- 顶级栏目、笔记分类和页面数量必须在同一次修改中于三个语言版本同步增删。
-
-## 工具与配置
-
-所有开发工具都在 `tools/`；不要新建第二套工具目录。`package.json` 中的公开命令名是稳定接口，修改内部实现时不得改名。
-
-```sh
-pnpm translate:docs
-pnpm translate:docs:write
-pnpm translate:docs:force
-pnpm check:multilingual:structure
-pnpm check:multilingual
-pnpm test:multilingual
-```
-
-- `pnpm translate:docs`：只读列出简体中文源及其英语、繁体中文目标；不写文件，也不调用模型。
-- `pnpm translate:docs:write`：只创建缺失目标。英语页面由配置的本机模型翻译；繁体中文页面由本机 OpenCC 离线转换；已有目标不会被覆盖。审阅每个生成文件。
-- `pnpm translate:docs:force`：按相同规则重新生成已有英语和繁体中文目标并覆盖它们。
-- `pnpm check:multilingual:structure`：只运行第一阶段（等价 CLI：`node tools/check-multilingual.mjs --structure-only`）。它确定性地检查三个版本中每个页面、README 和可见界面文案的语言覆盖、结构、代码、数学、Mermaid、链接和配置，完成后直接退出，不调用模型。它不需要模型配置、凭据或网络。
-- `pnpm check:multilingual`：严格按顺序运行两个阶段。第一阶段完整通过后，第二阶段才会把清理后的配对内容发送给配置的模型做语义审阅。第一阶段有任何错误都意味着零次模型请求。
-- `pnpm test:multilingual`：翻译、两阶段多语言检查、隐私、路径和写入安全的行为测试，包括第一阶段失败时绝不调用模型。
-
-翻译命令接受 `-- --lang en|zh-tw` 或 `-- --only <path>` 以缩小范围。翻译保留代码、公式、数字和 URL 目标；流程图、时序图和状态图的 Mermaid 标签按安全规则翻译，无法安全处理时整批报错且不写入。
-
-- `tools/check-multilingual.mjs`：两阶段多语言检查器。
-- `tools/translate-docs.mjs`：翻译命令行入口。
-- `tools/document-model.mjs`、`tools/markdown-safety.mjs` 与 `tools/semantic-safe.mjs`：文档配对与结构、Markdown 隐私与写入安全、语义审阅投影。
-- `tools/traditional-chinese.mjs` 与 `tools/mermaid-translate.mjs`：OpenCC 转换检查和安全的 Mermaid 标签翻译。
-- `tools/ai-model.mjs` 与 `tools/ai-search.mjs`：本机模型适配器和仅用于开发服务器的 AI 搜索端点。
-- `tools/site-config.mjs`：读取并校验根目录公开的 `config.json`；它绝不读取私有模型配置。
-- `tools/config.yaml`：唯一的默认私有工具配置；仅本机模型适配器在运行时为认证和工具默认值读取它。
-- `tools/*.test.mjs`：与实现同目录的行为测试。
-
-### 公开站点配置
-
-可选站点功能统一由根目录的公开、非敏感文件 `config.json` 配置。它只能包含已公开的开关；未知字段会被拒绝，且绝不能包含 endpoint、凭据、令牌或个人数据。
-
-```json
-{
-  "aiSearch": {
-    "enabled": false
-  },
-  "performance": {
-    "prefetchLinks": false
-  }
-}
-```
-
-AI 搜索是可选的本机开发功能，不进入静态生产站点。它默认关闭；要使用它，将 `aiSearch.enabled` 改为 `true` 并重启 `pnpm docs:dev`。问题和选中的公开页面摘录会发送给配置的模型服务；私有块、HTML 注释、草稿和非公开页面不会进入模型输入。接口只接受来自回环地址且 `Host`/`Origin` 与本站同源匹配的客户端；界面提供取消按钮，错误和超时会明确显示。
-
-`performance.prefetchLinks` 控制 VitePress 的链接预取。默认 `false` 避免首屏预取其他语言版本的页面，从而减少初始请求；设为 `true` 可能加快后续导航，但会增加首屏请求，请按需取舍。
-
-适配器直接调用 OpenAI 兼容的模型 API。无论文件内容如何，`pnpm docs:build` 都把开关解析为 `false`，因此生产包不含 AI 按钮、endpoint、适配器、配置对象或凭据。GitHub Pages 是纯静态托管；公开可用的 AI 必须另建有服务端凭据保护的后端。开发服务器只提供 `docs/`、`docs/public/` 和 `node_modules/`，构建会拒绝可发布路径中的私有文件或符号链接/junction。这些是纵深防御，不构成对已失陷本地账户或文件系统的绝对保证。
-
-### 私有工具配置
-
-`tools/config.yaml` 是本机工具唯一的默认私有配置。它被 Git 忽略、仅本机存在，绝不会被服务、打包或发布。它同时保存模型目录和工具默认值：默认服务商、默认模型、请求超时和默认输出上限。仓库内没有第二份逐工具配置文件。
-
-```yaml
-# Default provider key from `providers` (optional; otherwise the built-in default when present, then the first).
-provider: local
-# Default model id (or display name) within that provider (optional; otherwise the first model).
-model: example-model
-# Model request timeout in milliseconds (optional; default 300000).
-timeoutMs: 300000
-# Default max output tokens per request (optional; default 16384).
-maxOutputTokens: 16384
-
-providers:
-  local:
-    baseUrl: "https://model.example/v1"
-    api: openai-completions
-    apiKey: "<your-api-key>"
-    models:
-      - id: example-model
-        name: Example Model
-        contextWindow: 32768
-        maxTokens: 4096
-        input: [text]
-        # optional: reasoningEffort: none|low|medium|high|max|null (also allowed on the provider)
-```
-
-`provider` 与 `model` 选择默认值；省略时，适配器优先使用已配置的内置默认服务商，其次使用第一个服务商，并使用该服务商的第一个模型。`timeoutMs` 与 `maxOutputTokens` 是可选正整数，默认值如上。每次运行可用环境变量覆盖：`AI_MODEL_CONFIG` 指向另一份私有 YAML/JSON 文件，`AI_MODEL` 与 `AI_MODEL_PROVIDER` 选择模型和服务商，`AI_REQUEST_TIMEOUT_MS` 设置超时。配置缺失、不可读或无效时直接失败，不会使用伪造回退。
-
-`providers` 把服务商名称映射到其设置。`api` 必须为 `openai-completions` 或 `openai-compatible`。`baseUrl` 必须使用 HTTPS（本机回环地址可使用 HTTP），且不得包含凭据、查询参数或片段。每个模型的 `id` 必须唯一；`contextWindow` 与 `maxTokens` 若存在必须为正整数，且 `maxTokens` 不得大于 `contextWindow`；`input` 若存在必须是非空字符串数组。`reasoningEffort` 如使用，只能是 `none`、`low`、`medium`、`high`、`max` 或 null。
-
-**私钥规则：**`tools/config.yaml` 以及 `AI_MODEL_CONFIG` 指定的文件是用户的真实敏感配置。仅本机模型适配器可在运行时于本机读取它们用于认证。人和 agent 不得读取、打印、复制、移动或提交它们，也不得把其内容粘贴到文档、源码、Actions 或 AI 对话中；适配器不得泄露它们。备用文件必须位于仓库外或已忽略的私有位置，绝不能放在 `docs/` 或其他可发布路径。绝不能用占位值覆盖已有的私有配置文件。
-
-## 本地开发
-
-需要 Node.js 和 pnpm（pnpm 版本由 `packageManager` 固定）。安装、开发、构建和预览：
+需要 Node.js 和 pnpm；pnpm 版本由 `packageManager` 固定。
 
 ```sh
 pnpm install --frozen-lockfile
+pnpm content:sync
 pnpm docs:dev
+```
+
+`content:sync` 需要下文所述的私有模型配置。一切已同步时，它不会调用模型，也不会改动文件。
+
+## 只写简体中文
+
+工作流程：修改一个简体中文页面，运行 `pnpm content:sync`，用 `pnpm docs:dev` 预览，然后提交简体中文源、两个生成版本和状态清单。
+
+`docs/zh-cn/` 是唯一的内容源。每个页面按相对路径映射到 `docs/en/` 和 `docs/zh-tw/`，以及对应的公开 URL：
+
+| 简体中文（源） | 英语 | 繁体中文 |
+| --- | --- | --- |
+| `docs/zh-cn/Notes/Courses/demo.md` | `docs/en/Notes/Courses/demo.md` | `docs/zh-tw/Notes/Courses/demo.md` |
+| `/zh-cn/Notes/Courses/demo` | `/en/Notes/Courses/demo` | `/zh-tw/Notes/Courses/demo` |
+
+### 目录与索引页
+
+- 把页面放进它所属的目录。读者需要作为栏目浏览的目录应有一个 `index.md` 作为栏目首页。目录 URL 以 `/` 结尾；普通页面 URL 去掉 `.md`。
+- 如果目录里已有 Markdown 但没有 `index.md`，`content:sync` 会生成一个最小的简体中文索引及其两个译本。已有的 `index.md` 绝不会被覆盖，你可以自行修改它的标题和引言。
+- 只有当简体中文、英语和繁体中文三个页面都存在、可读，且都没有标记 `draft: true` 或 `private: true` 时，条目才会出现在导航和列表中；否则三个版本会同时隐藏该条目。
+
+### 文件名与标题
+
+- 文件名和目录名会成为公开 URL。请使用简短、稳定、不含空格的 ASCII 名称；小写单词加连字符最稳妥。以 `.` 开头的名称不会进入导航，`index.md` 保留给目录首页。
+- 导航和页面标题依次取自 frontmatter 中的 YAML `title`、第一个可见的一级标题（忽略 HTML 注释、私密块和代码围栏中的标题）、路径名。
+- 每个页面开头写一个明确的一级标题。重命名文件或目录会改变公开 URL，因此已发布的名称应尽量保持稳定。
+- frontmatter 中可选的数字 `order` 决定排序（越小越前）；未标记的条目按相对路径排序。关于、项目、笔记保持现有的顶级顺序，新的顶级栏目排在笔记之后。
+
+### 内容与链接
+
+- 按普通 VitePress Markdown 写作。源文件中的站内链接使用 `/zh-cn/...`；生成的版本会得到对应的 `/en/...` 和 `/zh-tw/...` 链接。
+- 翻译会保留代码块、行内代码、公式、数字、frontmatter、URL 和 Mermaid 结构。读者可见的 Mermaid 标签会在安全规则下翻译。
+- 笔记索引页用 `<NotesIndex />` 自动列出子页面，包含标题和简短摘要（frontmatter `description` 或首段）。保留该组件和引言文字，不要手动添加条目链接。新增页面和分类不需要改任何 TypeScript 或索引列表：重启 `pnpm docs:dev` 或重新构建即可刷新导航和侧栏；笔记列表在开发模式下还会热更新。
+- 用 `draft: true` 或 `private: true` 可把页面从导航和列表中隐藏；给某个栏目的 `index.md` 加上这些字段会隐藏整棵子树。这些字段只影响导航和列表，不影响 Git 或 VitePress 构建，所以绝不要把密钥或真正私密的内容放进 `docs/`。未翻译、不可读或 YAML 损坏的页面同样不会进入导航。
+- 不要编辑 `docs/en/`、`docs/zh-tw/` 或 `docs/.vitepress/navigation.*`。修改简体中文源后重新运行 `content:sync`。
+
+## `content:sync` 的工作方式
+
+- 用配置的模型把新增或修改过的简体中文页面翻译成英语和繁体中文。两个版本都是真正的 AI 翻译；OpenCC 只辅助繁体用字校正。
+- 为 `docs/zh-cn` 页面（不含根目录 README）记录一份可提交的 `tools/content-sync-state.json`（版本 1）和 SHA-256 内容哈希，未变化的源会被跳过，不会重复调用模型。清单只含路径、哈希和自动索引标记，不含页面内容或凭据。
+- 只有当目标由工具生成、且其哈希仍与记录的基线一致时才更新。手工改过的目标、没有可信基线的目标，或并发变更，都会被拒绝并以退出码 1 报告；不会悄悄覆盖。恢复时从版本控制还原目标（或删除目标后重跑），再同步一次；不要手工合并生成页面。
+- 清单缺失时，工具先对现有的完整三语页面做哈希，建立可信基线；此过程不读取模型配置，也不调用模型。请提交这份基线。之后删除清单会把当前目标内容当作新基线，因此更早的人工修改不再被检测到。
+- 为 `docs/zh-cn/` 下（根目录除外）缺少 `index.md` 的内容目录生成最小索引。Notes 目录得到动态的 `<NotesIndex />` 页面；其他目录得到 `# <directory name>` 链接列表。自动创建的索引会在所属目录新增或删除页面时刷新，并重新翻译两个版本。一旦手工修改自动创建的索引，它就会降级为普通源，不再被自动改写。工具运行前就存在的用户索引绝不会被覆盖。
+- 对每个生成目标依次执行：模型翻译、结构与安全校验、模型语义审阅。任何失败都会在写入前中止整次运行。这是逐个目标的校验，不是全站两阶段审查。
+- 所有目标都通过后，把目标页面和状态清单放在同一个原子批次中写入，清单最后写入。写入失败会回滚并报告。如果在检查到重命名之间的短暂窗口内崩溃，下次运行会把目标报告为冲突，而不是覆盖它。
+- 一切已同步或已更新时退出码为 `0`；冲突、生成、语义或写入失败为 `1`；参数错误为 `2`。
+
+选项要写在 `--` 之后，例如 `pnpm content:sync -- --dry-run`。常用选项：`--dry-run`（只计划，不调用模型、不写文件）、`--only <source-or-target-path>`（可重复）、`--lang en|zh-tw`（可重复；只处理和记录所选语言）、`--init`（为现存完整三语页面建立基线；清单已存在时拒绝）、`--root <dir>`（隔离根目录）、`--timeout <ms>` 和 `--help`。
+
+## 敏感内容与模型边界
+
+`content:sync` 会把清理后的简体中文源文本发送给配置的模型服务。如果该服务是远程的，页面内容就会离开这台电脑。
+
+- HTML 注释和显式私密块（`<!-- private:start -->` … `<!-- private:end -->`）会在发送给模型前移除，也不会写入生成版本。
+- 私密标记不是访问控制。`docs/zh-cn/` 下的文字仍然存在于 Git 中，并会在简体中文站点发布；它们只用于避免内容进入模型输入和译本。
+- 可选的 AI 搜索只在本地开发服务器运行。它会把问题和选中的公开页面摘要发送给配置的模型；标记 `draft: true` 或 `private: true` 的页面、HTML 注释、私密块和非公开文件都会被排除。端点只接受回环客户端，并要求同源的 `Host`/`Origin` 头；凭据始终留在本机服务器。
+- 绝不要把 API 密钥、令牌、密码或私有配置写进 Markdown、`config.json`、源代码、Actions 或模型对话。
+- `tools/config.yaml` 是本机私有模型配置。只有本机模型适配器会在运行时读取它。人类和 agent 绝不能读取、打印、复制、移动或提交它，也绝不能用占位值替换它。
+- 生产站点不含 AI 端点、适配器、配置对象或凭据。AI 搜索只是本地开发功能，构建会拒绝可发布路径中的私有文件或符号链接。
+
+## 配置
+
+公开、非敏感的开关位于根目录 `config.json`：
+
+```json
+{
+  "aiSearch": false,
+  "prefetchLinks": false
+}
+```
+
+两个开关都是可选的，默认 `false`；未知字段和非布尔值会被拒绝。`aiSearch` 启用本地开发用的 AI 搜索，在生产构建中始终禁用。`prefetchLinks` 控制 VitePress 的链接预取。
+
+私有模型配置是 `tools/config.yaml`：被 Git 忽略，位于 `docs/` 和任何可发布路径之外，绝不会被提供或打包。最小形式如下：
+
+```yaml
+baseUrl: "https://model.example/v1"
+apiKey: "<API_KEY>"
+model: "<MODEL_ID>"
+```
+
+只有 `baseUrl`、`apiKey` 和 `model` 是必填项。可选字段及默认值：`api`（`openai-completions`）、`timeoutMs`（`300000`）、`maxOutputTokens`（`16384`）、`reasoningEffort`（`none`）。`baseUrl` 必须使用 HTTPS（回环 HTTP 地址除外），不能包含凭据、查询字符串或片段，并且没有隐式默认值，以免凭据被发送到非预期的服务。API 默认为 OpenAI 兼容的 chat completions。高级的单提供方多模型目录和现有的多提供方形式仍受支持。`AI_MODEL`、`AI_MODEL_CONFIG`、`AI_MODEL_PROVIDER` 和 `AI_REQUEST_TIMEOUT_MS` 可在单次运行中覆盖模型、配置文件、提供方和请求超时。配置错误会按失败处理。
+
+## 检查、预览与发布
+
+```sh
+pnpm check:multilingual:structure
+pnpm check:multilingual
+pnpm test:multilingual
 pnpm docs:build
 pnpm docs:preview
 ```
 
-`pnpm docs:dev` 提供三个版本，包括根入口。Markdown 支持 `$...$` 行内公式、`$$...$$` 块级公式和围栏 `mermaid` 图表；课程笔记演示页包含这三类示例。字体、公式和图表都在本机渲染，不从 CDN 加载。
+`check:multilingual:structure` 是全站确定性阶段，不需要模型或凭据。`check:multilingual` 是全站两阶段审查：先结构，后语义。`test:multilingual` 运行翻译与安全行为测试；`docs:build` 和 `docs:preview` 构建并预览生产站点。
 
-### 网络需求与离线边界
+发布前运行 `pnpm content:sync`，审阅生成的页面，并运行 `pnpm check:multilingual` 完成全站两阶段审查。把简体中文源、生成的英语和繁体中文页面以及状态清单一起提交，这样下次同步才有可信基线。
 
-所有浏览器运行时资源都由本站同源提供，不请求 CDN 或第三方运行时服务。这不等于整个应用可以完全离线：
+推送到 `main` 会触发 `.github/workflows/static.yml`，安装依赖、构建站点，并把 `docs/.vitepress/dist` 部署到 GitHub Pages。仓库的 Pages 来源必须设为 **GitHub Actions**。工作流不调用模型，也不持有模型凭据；生产环境始终禁用 AI 搜索。部署完成后等待工作流结束，并抽查三个版本。
 
-- 访问已部署的站点需要连接其托管服务器；`pnpm docs:dev` 和 `pnpm docs:preview` 需要本地服务器。
-- 首次 `pnpm install` 需要访问包仓库；在本地缓存不完整时重新安装也需要网络。
-- 如果配置的是远端模型 API，AI 搜索、英语翻译和依赖模型的检查需要连通该 API。适配器在本机运行，但这不代表模型可以离线使用。
+## 站点与安全规则
 
-网络传输时间取决于访问者的网络和托管服务；站点不保证任何加载耗时或单项资源时延。
-
-不得把站点或其 AI 功能描述为完全离线，也不得为了绕过网络限制而引入外部运行时资源。
-
-## 资源、字体与渲染
-
-所有浏览器运行时资源必须同源提供。CSP 在 `docs/.vitepress/head.ts` 中限制资源来源；字体放在 `docs/public/fonts/`，图片放在 `docs/public/images/`。正文使用本地 Noto Sans SC，代码使用 Latin Modern Mono，公式使用 `markdown-it-mathjax3` 生成的 MathJax SVG，图表由本地加载的 Mermaid 绘制，符号与表情使用 Nerd Fonts、Noto Emoji 和 Twemoji Mozilla。字体授权文件随站点放在 `docs/public/fonts/` 下。不要引入 CDN、第三方字体或远程渲染服务；关于页的 GitHub、QQ、Telegram、Signal 是用户主动点击的外链，不属于运行时资源。
-
-翻译工具保留代码、公式和链接目标；对流程图、时序图和状态图的 Mermaid 标签按安全规则翻译，无法安全处理时报错而不写入。
-
-## 检查与验收
-
-主要检查命令如下：
-
-| 命令 | 用途 |
-| --- | --- |
-| `pnpm check:multilingual:structure` | 只做第一阶段确定性检查：完整的语言覆盖、页面与 README 结构、代码、数学、Mermaid、链接、繁体中文转换和界面文案。不需要模型配置或凭据。 |
-| `pnpm check:multilingual` | 两个阶段：第一阶段必须完整通过，第二阶段才可调用模型做语义审阅。第一阶段有任何错误都意味着零次模型请求。 |
-| `pnpm test:multilingual` | 翻译、两阶段多语言检查、隐私、路径和写入安全的行为测试。 |
-| `pnpm docs:build` | 生成生产站点 `docs/.vitepress/dist`。 |
-
-第一阶段枚举三个文档目录、根目录三份 README、其他受支持的根目录中文文档，以及从 `en-us.ts`、`zh-cn.ts`、`zh-tw.ts` 加载的可见界面文案。它检查路径、标题层级、段落、列表和引用结构、表格、代码围栏、数学、Mermaid 结构、链接目标与语言前缀、未转换的繁体中文、导航、侧栏、frontmatter、受保护内容和配置，并收集全部错误而不是在第一个错误处停止。文件不可读、隐私失败和配置失败同样计为第一阶段错误。`docs/index.md` 是根入口，不参与配对。
-
-只有第一阶段没有任何错误时才运行第二阶段。它把清理后的配对页面内容和界面文案发送给配置的模型，逐页面做语义审阅；语义失败会以非零结果返回。模型输出只是审阅辅助，不能当作翻译质量的证明；请阅读结论，不要把语义失败当成通过。完整命令需要可用的私有模型配置，而 `pnpm check:multilingual:structure` 既不需要凭据，也不需要网络。
-
-人工验收至少覆盖：三个版本的首页、导航、侧栏和笔记条目；根路径针对繁体中文、其他中文、英语及其他语言的自动选择；禁用 JavaScript 或浏览器未提供语言时根路径回退到英文；明确语言路径和导航菜单中的语言切换保持生效；桌面与手机宽度；浅色和深色主题；数学公式与 Mermaid；字体加载；以及无 AI、无本站以外运行时请求的生产构建。
-
-冷缓存验收是目标而非保证：在访客网络、GitHub Pages 和浏览器条件允许时，全新、无缓存的浏览器首次加载每个版本的资源应低于 1 秒。部署后必须等 CI/CD workflow 完成，再用全新的浏览器配置、空缓存（或禁用缓存）测试线上站点，并报告真实测量结果和条件。不得伪造、挑选或隐藏耗时数据。
-
-- 只报告实际运行过的命令、真实输出和覆盖范围；未运行的检查不得声称通过。
-- 不得伪造内容、数据、截图或测试结果，也不得隐藏失败、警告或已知限制。
-- 不得为了通过检查、减小体积或加快开发而降低隐私或安全保证，例如绕过路径校验、把密钥放进前端或引入外部运行时服务。
-- 除非明确授权，保留现有公开 URL、用户内容和外部链接；不擅自改写个人事实。
-
-## 隐私与数据安全
-
-公开仓库中不得出现凭据、私有配置、草稿或未公开的个人数据。
-
-- 根目录 `config.json` 只能包含公开、非敏感开关。不得加入 endpoint、密钥、令牌或私有服务商设置；未知字段会被拒绝。
-- `tools/config.yaml` 必须保持被忽略、仅本机存在。仅本机模型适配器在运行时为认证读取它；人和 agent 不得读取、打印、复制或提交它。
-- 私有块标记 `<!-- private:start -->` 与 `<!-- private:end -->` 只控制模型输入，不改变文件的可发布性；标记内的文字仍可能通过 Git 或 VitePress 公开。
-- HTML 注释和私有块会从模型输入中移除；不要用它们存放密钥，也不要把密钥放进任何 Markdown。
-- 翻译工具在写入整批文件前验证结果并检查冲突；冲突检查不能代替备份。避免同时编辑目标文件，`translate:docs:force` 会覆盖已有英语和繁体中文页面。
-- 构建会拒绝可发布路径中的私有文件和符号链接/junction；开发服务器只按白名单提供文件。发现异常应修复原因，不要关闭保护。
-
-## 协作与文件归属
-
-本仓库可能在共享工作树中由多个 agent 协作。每个独立功能单独指派一个子 agent，并给出明确的文件清单和验收标准；不要把同一文件同时交给多个 agent。
-
-- 子 agent 只改自己负责的文件；需要共享文件时先问其 owner 或主 agent，不得跨范围修改。
-- 不要 reset、checkout 或覆盖用户及其他 agent 的改动；不要删除不认识的用户数据。`tools/config.yaml` 必须保持本地、被忽略；仅本机模型适配器在运行时读取，人和 agent 不得读取、打印、复制或提交它。
-- 子 agent 不在中途运行 build、test、lint 或 format；所有改动落地后由主 agent 统一验收并报告真实结果。
-- 功能拆分为可独立验收的小块；新功能要有对应行为测试，测试放在 `tools/` 并与实现同目录。
-- 结构和命令变化时同步更新三份 README；本 README 是唯一开发入口，不要创建平行的开发说明。
-- 报告阻塞、风险或需要决策的事项；不要用进度汇报代替实际完成。
-
-## 部署
-
-推送到 `main` 会触发 `.github/workflows/static.yml`，安装依赖、构建站点并把 `docs/.vitepress/dist` 部署到 GitHub Pages。仓库 Pages 的发布来源必须设为 **GitHub Actions**。
-
-- workflow 只运行安装、构建和部署，不运行模型检查，也不持有任何模型凭据。
-- 生产构建始终关闭 AI 搜索，即使 `config.json` 在本机为 `true`。
-- 发布前确认检查通过、工作树中没有私有文件、没有未审阅的翻译覆盖。
-- 部署后等 workflow 完成，再抽查三个版本的页面、导航、字体、公式和图表；站点不应请求非本站运行时资源。
-- 然后用全新的浏览器配置和空缓存执行冷缓存测试，并报告真实结果；不得承诺或伪造固定加载时间。
+- 根 URL 按浏览器首选语言选择版本：繁体中文（`zh-TW`、`zh-HK`、`zh-MO`、`zh-Hant`）→ `/zh-tw/`，其他中文 → `/zh-cn/`，其他所有语言或禁用 JavaScript → `/en/`。显式语言路径和导航中的语言菜单始终可用。
+- 浅色或深色主题默认跟随浏览器的系统偏好；访客使用主题开关后，手动选择会在后续访问中保留。浏览器工具栏颜色随当前主题变化。
+- 三个版本共享相同的相对路径、结构、事实和内容覆盖。除非得到明确授权，否则保持公开 URL、用户内容和外部链接稳定。命令、结构或规则变化时，保持 `README.md`、`README.zh-CN.md` 与 `README.zh-TW.md` 语义一致。
+- 所有浏览器运行时资源都由本站提供。不要添加 CDN、第三方字体或远程渲染服务；CSP 会限制运行时资源来源。
+- 本仓库可能由多个 agent 在共享工作树中编辑。每个文件只分配给一个负责人；不要重置或覆盖他人的改动，也不要删除无法识别的用户内容。agent 不得在中途运行构建、测试、lint 或格式化命令；所有改动落地后由主 agent 统一验证一次。
+- 报告真实结果、阻塞、风险和决策。不要声称未运行的检查已通过，不要伪造翻译质量，也不要为了让检查通过而削弱隐私或安全。

@@ -1013,8 +1013,8 @@ test('fails the index closed when private config identity cannot be resolved', a
     )
 })
 
-test('skips symlinked Markdown and directory escapes during indexing', async (t) => {
-    const root = await mkdtemp(path.join(tmpdir(), 'ai-index-symlink-'))
+test('skips directory junction escapes during indexing', async (t) => {
+    const root = await mkdtemp(path.join(tmpdir(), 'ai-index-junction-'))
     t.after(() => rm(root, { recursive: true, force: true }))
 
     const docs = path.join(root, 'docs')
@@ -1023,9 +1023,56 @@ test('skips symlinked Markdown and directory escapes during indexing', async (t)
     await mkdir(en, { recursive: true })
     await mkdir(outsideDir, { recursive: true })
 
+    const normalMarker = 'junctionnormalmarkerword'
+    const directoryEscapeMarker = 'junctiondirectoryescapemarkerword'
+    await writeFile(
+        path.join(en, 'normal.md'),
+        `# Normal\n\n${normalMarker} pendulum period depends on length.\n`,
+        'utf8'
+    )
+    await writeFile(
+        path.join(outsideDir, 'escaped.md'),
+        `# Outside\n\n${directoryEscapeMarker} escaped content.\n`,
+        'utf8'
+    )
+
+    try {
+        await symlink(
+            outsideDir,
+            path.join(en, 'linked-dir'),
+            process.platform === 'win32' ? 'junction' : 'dir'
+        )
+    } catch (error) {
+        if (
+            error?.code === 'EPERM' ||
+            error?.code === 'EACCES' ||
+            error?.code === 'ENOSYS' ||
+            error?.code === 'ENOTSUP'
+        ) {
+            t.skip(`directory links are unavailable: ${error.code}`)
+            return
+        }
+        throw error
+    }
+
+    const index = await buildDocsIndex(docs)
+    const indexedText = index.chunks
+        .map((chunk) => `${chunk.title}\n${chunk.heading}\n${chunk.text}`)
+        .join('\n')
+    assert.match(indexedText, new RegExp(normalMarker))
+    assert.doesNotMatch(indexedText, new RegExp(directoryEscapeMarker))
+})
+
+test('skips symlinked Markdown during indexing', async (t) => {
+    const root = await mkdtemp(path.join(tmpdir(), 'ai-index-symlink-'))
+    t.after(() => rm(root, { recursive: true, force: true }))
+
+    const docs = path.join(root, 'docs')
+    const en = path.join(docs, 'en')
+    await mkdir(en, { recursive: true })
+
     const normalMarker = 'symlinknormalmarkerword'
     const fileEscapeMarker = 'symlinkfileescapemarkerword'
-    const directoryEscapeMarker = 'symlinkdirectoryescapemarkerword'
     await writeFile(
         path.join(en, 'normal.md'),
         `# Normal\n\n${normalMarker} pendulum period depends on length.\n`,
@@ -1037,32 +1084,88 @@ test('skips symlinked Markdown and directory escapes during indexing', async (t)
         `# Outside\n\n${fileEscapeMarker} escaped content.\n`,
         'utf8'
     )
-    await writeFile(
-        path.join(outsideDir, 'escaped.md'),
-        `# Outside\n\n${directoryEscapeMarker} escaped content.\n`,
-        'utf8'
-    )
 
     try {
         await symlink(outsideFile, path.join(en, 'linked.md'), 'file')
-        await symlink(
-            outsideDir,
-            path.join(en, 'linked-dir'),
-            process.platform === 'win32' ? 'junction' : 'dir'
-        )
     } catch (error) {
         if (
             error?.code === 'EPERM' ||
             error?.code === 'EACCES' ||
-            error?.code === 'ENOSYS'
+            error?.code === 'ENOSYS' ||
+            error?.code === 'ENOTSUP'
         ) {
-            t.skip('symlinks are unavailable on this system')
+            t.skip(`file symlinks are unavailable: ${error.code}`)
             return
         }
         throw error
     }
 
     const index = await buildDocsIndex(docs)
+    const indexedText = index.chunks
+        .map((chunk) => `${chunk.title}\n${chunk.heading}\n${chunk.text}`)
+        .join('\n')
+    assert.match(indexedText, new RegExp(normalMarker))
+    assert.doesNotMatch(indexedText, new RegExp(fileEscapeMarker))
+})
+
+test('rejects injected symlink metadata and canonical directory escapes during indexing', async (t) => {
+    const root = await mkdtemp(path.join(tmpdir(), 'ai-index-injected-link-'))
+    t.after(() => rm(root, { recursive: true, force: true }))
+
+    const docs = path.join(root, 'docs')
+    const en = path.join(docs, 'en')
+    const outsideDir = path.join(root, 'outside')
+    await mkdir(en, { recursive: true })
+    await mkdir(outsideDir, { recursive: true })
+
+    const normalMarker = 'injectednormalmarkerword'
+    const fileEscapeMarker = 'injectedfileescapemarkerword'
+    const directoryEscapeMarker = 'injecteddirectoryescapemarkerword'
+    await writeFile(
+        path.join(en, 'normal.md'),
+        `# Normal\n\n${normalMarker} pendulum period depends on length.\n`,
+        'utf8'
+    )
+    const outsideFile = path.join(outsideDir, 'escaped.md')
+    await writeFile(
+        outsideFile,
+        `# Outside\n\n${directoryEscapeMarker} escaped content.\n`,
+        'utf8'
+    )
+    const linked = path.join(en, 'linked.md')
+    const escaped = path.join(en, 'escaped.md')
+    await writeFile(
+        linked,
+        `# Linked\n\n${fileEscapeMarker} must never be indexed.\n`,
+        'utf8'
+    )
+    await writeFile(
+        escaped,
+        `# Escaped\n\n${directoryEscapeMarker} must never be indexed.\n`,
+        'utf8'
+    )
+
+    // Metadata-only simulation: the decoy files stay real and readable, so a
+    // regression in either escape check would surface as indexed content.
+    const fakeFs = {
+        ...DEFAULT_FILE_SYSTEM_OPS,
+        lstatSync(value) {
+            if (pathKey(value) === pathKey(linked)) {
+                return {
+                    isSymbolicLink: () => true,
+                    isDirectory: () => false,
+                    isFile: () => false,
+                }
+            }
+            return DEFAULT_FILE_SYSTEM_OPS.lstatSync(value)
+        },
+        realpathSync(value) {
+            if (pathKey(value) === pathKey(escaped)) return outsideFile
+            return DEFAULT_FILE_SYSTEM_OPS.realpathSync(value)
+        },
+    }
+
+    const index = await buildDocsIndex(docs, { fs: fakeFs })
     const indexedText = index.chunks
         .map((chunk) => `${chunk.title}\n${chunk.heading}\n${chunk.text}`)
         .join('\n')
@@ -1857,7 +1960,7 @@ test('file access guard blocks private files, encodings, and virtual symlink esc
             writeFile(modelConfigPath, 'FAKE_KEY_SENTINEL', 'utf8'),
             writeFile(envModelConfig, 'FAKE_CONFIG_SENTINEL', 'utf8'),
             writeFile(publicFile, 'public', 'utf8'),
-            writeFile(publicConfig, '{"aiSearch":{"enabled":false}}', 'utf8'),
+            writeFile(publicConfig, '{"aiSearch":false}', 'utf8'),
             writeFile(docFile, '# page', 'utf8'),
             writeFile(dependencyFile, 'export default 1', 'utf8'),
             writeFile(outsideFile, 'outside', 'utf8'),
@@ -2165,7 +2268,7 @@ test('publish scan rejects private files and virtual symlink escapes', async () 
             writeFile(path.join(publicDir, 'ok.css'), 'body{}', 'utf8'),
             writeFile(
                 path.join(publicDir, 'config.json'),
-                '{"aiSearch":{"enabled":false}}',
+                '{"aiSearch":false}',
                 'utf8'
             ),
             writeFile(modelConfigPath, 'FAKE_KEY_SENTINEL', 'utf8'),
@@ -2428,49 +2531,54 @@ test('private tool configuration uses only ignored repo paths or outside repo', 
     }
 })
 
-test('exposes nested public switches and always disables production builds', async () => {
+test('exposes flat public switches and always disables production builds', async () => {
     const enabledConfig = parseSiteConfig({
-        aiSearch: { enabled: true },
-        performance: { prefetchLinks: true },
+        aiSearch: true,
+        prefetchLinks: true,
     })
     assert.deepEqual(enabledConfig, {
-        aiSearch: { enabled: true },
-        performance: { prefetchLinks: true },
+        aiSearch: true,
+        prefetchLinks: true,
     })
     assert.ok(Object.isFrozen(enabledConfig))
-    assert.ok(Object.isFrozen(enabledConfig.aiSearch))
-    assert.ok(Object.isFrozen(enabledConfig.performance))
 
     const disabledConfig = parseSiteConfig({
-        aiSearch: { enabled: false },
-        performance: { prefetchLinks: false },
+        aiSearch: false,
+        prefetchLinks: false,
     })
     assert.deepEqual(disabledConfig, {
-        aiSearch: { enabled: false },
-        performance: { prefetchLinks: false },
+        aiSearch: false,
+        prefetchLinks: false,
     })
     assert.ok(Object.isFrozen(disabledConfig))
-    assert.ok(Object.isFrozen(disabledConfig.aiSearch))
-    assert.ok(Object.isFrozen(disabledConfig.performance))
 
-    const performanceOnly = parseSiteConfig({
-        aiSearch: { enabled: false },
-        performance: { prefetchLinks: true },
+    const aiOnly = parseSiteConfig({ aiSearch: true })
+    assert.deepEqual(aiOnly, {
+        aiSearch: true,
+        prefetchLinks: false,
+    })
+    const prefetchOnly = parseSiteConfig({ prefetchLinks: true })
+    assert.deepEqual(prefetchOnly, {
+        aiSearch: false,
+        prefetchLinks: true,
+    })
+    assert.deepEqual(parseSiteConfig({}), {
+        aiSearch: false,
+        prefetchLinks: false,
     })
 
     assert.equal(resolveAiSearchEnabled('serve', enabledConfig), true)
     assert.equal(resolveAiSearchEnabled('serve', disabledConfig), false)
-    assert.equal(resolveAiSearchEnabled('serve', performanceOnly), false)
+    assert.equal(resolveAiSearchEnabled('serve', aiOnly), true)
+    assert.equal(resolveAiSearchEnabled('serve', prefetchOnly), false)
     assert.equal(resolveAiSearchEnabled('build', enabledConfig), false)
     assert.equal(resolveAiSearchEnabled('preview', enabledConfig), false)
 
     assert.deepEqual(DEFAULT_SITE_CONFIG, {
-        aiSearch: { enabled: false },
-        performance: { prefetchLinks: false },
+        aiSearch: false,
+        prefetchLinks: false,
     })
     assert.ok(Object.isFrozen(DEFAULT_SITE_CONFIG))
-    assert.ok(Object.isFrozen(DEFAULT_SITE_CONFIG.aiSearch))
-    assert.ok(Object.isFrozen(DEFAULT_SITE_CONFIG.performance))
     assert.equal(
         SITE_CONFIG_PATH,
         path.resolve(
@@ -2489,44 +2597,37 @@ test('exposes nested public switches and always disables production builds', asy
         DEFAULT_SITE_CONFIG
     )
     const rootConfig = readSiteConfig(SITE_CONFIG_PATH)
-    assert.equal(typeof rootConfig.aiSearch.enabled, 'boolean')
-    assert.equal(typeof rootConfig.performance.prefetchLinks, 'boolean')
+    assert.equal(typeof rootConfig.aiSearch, 'boolean')
+    assert.equal(typeof rootConfig.prefetchLinks, 'boolean')
 
     for (const invalid of [
         null,
         [],
         'true',
         1,
-        {},
-        { aiSearch: null, performance: { prefetchLinks: false } },
-        { aiSearch: [], performance: { prefetchLinks: false } },
-        { aiSearch: {}, performance: { prefetchLinks: false } },
-        { aiSearch: { enabled: 'true' }, performance: { prefetchLinks: false } },
-        { aiSearch: { enabled: 1 }, performance: { prefetchLinks: false } },
-        { performance: { prefetchLinks: false } },
+        { aiSearch: 'true' },
+        { aiSearch: 1 },
+        { aiSearch: null },
+        { aiSearch: [] },
+        { aiSearch: {} },
+        { prefetchLinks: 'false' },
+        { prefetchLinks: 1 },
+        { prefetchLinks: null },
+        {
+            aiSearch: true,
+            prefetchLinks: true,
+            apiKey: 'sk-test-secret',
+        },
+        { aiSearch: false, baseUrl: 'https://example.invalid' },
         { aiSearch: { enabled: true } },
-        { aiSearch: { enabled: true }, performance: null },
-        { aiSearch: { enabled: true }, performance: [] },
-        { aiSearch: { enabled: true }, performance: {} },
+        { performance: { prefetchLinks: false } },
         {
-            aiSearch: { enabled: true },
-            performance: { prefetchLinks: 'false' },
-        },
-        { aiSearch: { enabled: true }, performance: { prefetchLinks: 1 } },
-        {
-            aiSearch: { enabled: true },
-            performance: { prefetchLinks: true, apiKey: 'sk-test-secret' },
-        },
-        {
-            aiSearch: {
-                enabled: false,
-                baseUrl: 'https://example.invalid',
-            },
+            aiSearch: true,
             performance: { prefetchLinks: false },
         },
         {
-            aiSearch: { enabled: true },
-            performance: { prefetchLinks: false },
+            aiSearch: true,
+            prefetchLinks: false,
             extra: true,
         },
     ]) {
@@ -2549,7 +2650,7 @@ test('exposes nested public switches and always disables production builds', asy
         const invalidFile = path.join(configDir, 'invalid.json')
         await writeFile(
             invalidFile,
-            '{"aiSearch":{"enabled":true},"performance":{"prefetchLinks":false},"apiKey":"sk-config-secret"}',
+            '{"aiSearch":true,"prefetchLinks":false,"apiKey":"sk-config-secret"}',
             'utf8'
         )
         assert.throws(

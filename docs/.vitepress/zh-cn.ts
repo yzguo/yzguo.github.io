@@ -1,20 +1,20 @@
-import { defineConfig, type DefaultTheme } from 'vitepress'
+import { defineConfig } from 'vitepress'
+import { buildLocaleNavigation } from './navigation.mjs'
+
+/*
+ * 导航与侧栏由 docs/zh-cn 的 Markdown 树自动生成；新增页面或运行
+ * content:sync 后无需修改本文件。标题取本语言 frontmatter title 或首个可见
+ * H1。这里只维护可见界面文案。
+ */
+const navigation = buildLocaleNavigation('zh-cn')
 
 export const zh_cn = defineConfig({
     lang: 'zh-CN',
     description: "个人主页。",
     title: '郭彦禛',
     themeConfig: {
-        nav: [
-            { text: '关于', link: '/zh-cn/About/', activeMatch: '^/zh-cn/About/' },
-            { text: '项目', link: '/zh-cn/Projects/', activeMatch: '^/zh-cn/Projects/' },
-            { text: '笔记', link: '/zh-cn/Notes/', activeMatch: '^/zh-cn/Notes/' }
-        ],
-        sidebar: {
-            '/zh-cn/About/': sidebarAbout(),
-            '/zh-cn/Projects/': sidebarProjects(),
-            '/zh-cn/Notes/': sidebarNotes()
-        },
+        nav: navigation.nav,
+        sidebar: navigation.sidebar,
         editLink: {
             pattern: 'https://github.com/yzguo/yzguo.github.io/edit/main/docs/:path',
             text: "在 GitHub 上编辑此页"
@@ -30,35 +30,3 @@ export const zh_cn = defineConfig({
         darkModeSwitchTitle: "切换到深色模式"
     }
 })
-
-function sidebarAbout(): DefaultTheme.SidebarItem[] {
-    return [{ text: '关于', link: '/zh-cn/About/' }]
-}
-
-function sidebarProjects(): DefaultTheme.SidebarItem[] {
-    return [{ text: '项目', link: '/zh-cn/Projects/' }]
-}
-
-function sidebarNotes(): DefaultTheme.SidebarItem[] {
-    return [{
-        text: '笔记',
-        link: '/zh-cn/Notes/',
-        items: [
-            {
-                text: '课程笔记',
-                link: '/zh-cn/Notes/Courses/',
-                items: [{ text: '课程笔记演示', link: '/zh-cn/Notes/Courses/demo' }]
-            },
-            {
-                text: '学习笔记',
-                link: '/zh-cn/Notes/Learning/',
-                items: [{ text: '学习笔记演示', link: '/zh-cn/Notes/Learning/demo' }]
-            },
-            {
-                text: '工作笔记',
-                link: '/zh-cn/Notes/Work/',
-                items: [{ text: '工作笔记演示', link: '/zh-cn/Notes/Work/demo' }]
-            }
-        ]
-    }]
-}

@@ -1,0 +1,155 @@
+{
+  "version": 1,
+  "pages": {
+    "docs/zh-cn/About/index.md": {
+      "sourceHash": "sha256:c4a61338d7bdb028997413183163cfda1dac3eb0c3b30662a2ac77336100bbe4",
+      "targets": {
+        "en": {
+          "path": "docs/en/About/index.md",
+          "hash": "sha256:05c64da0509a4b92ec7678830c19fa04c7dc7479dddc1b8642f411176a6590de",
+          "sourceHash": "sha256:c4a61338d7bdb028997413183163cfda1dac3eb0c3b30662a2ac77336100bbe4"
+        },
+        "zh-tw": {
+          "path": "docs/zh-tw/About/index.md",
+          "hash": "sha256:a441f6f23de60b5e8ab0147c35d737279b638807e77a4b603654b3cff518bd3b",
+          "sourceHash": "sha256:c4a61338d7bdb028997413183163cfda1dac3eb0c3b30662a2ac77336100bbe4"
+        }
+      }
+    },
+    "docs/zh-cn/Notes/Courses/demo.md": {
+      "sourceHash": "sha256:9ea1c518645b33000e5b9510f88e981893a63d2b0b4137056b535e8b440c9f03",
+      "targets": {
+        "en": {
+          "path": "docs/en/Notes/Courses/demo.md",
+          "hash": "sha256:e40e6e80d60f63ad523212f52b8f6a245dd024760577614767df5997e8ea7a47",
+          "sourceHash": "sha256:9ea1c518645b33000e5b9510f88e981893a63d2b0b4137056b535e8b440c9f03"
+        },
+        "zh-tw": {
+          "path": "docs/zh-tw/Notes/Courses/demo.md",
+          "hash": "sha256:5b260c313734e7055852ee1eb099d605b5d2d70ee9670d56018868243b573e03",
+          "sourceHash": "sha256:9ea1c518645b33000e5b9510f88e981893a63d2b0b4137056b535e8b440c9f03"
+        }
+      }
+    },
+    "docs/zh-cn/Notes/Courses/index.md": {
+      "sourceHash": "sha256:5d069092b506887a87491310a771743ebc0cafdf3fb00c6cede88b23ee658bfc",
+      "targets": {
+        "en": {
+          "path": "docs/en/Notes/Courses/index.md",
+          "hash": "sha256:3f6c4b73a6666002050582c1c58b6f66ba93ee85e8e9cc5e6f721793cbff5a88",
+          "sourceHash": "sha256:5d069092b506887a87491310a771743ebc0cafdf3fb00c6cede88b23ee658bfc"
+        },
+        "zh-tw": {
+          "path": "docs/zh-tw/Notes/Courses/index.md",
+          "hash": "sha256:4b49a1ee42e99feaa2ddd192a91499334c1f9da3ee993c1e32b79ca40767a274",
+          "sourceHash": "sha256:5d069092b506887a87491310a771743ebc0cafdf3fb00c6cede88b23ee658bfc"
+        }
+      }
+    },
+    "docs/zh-cn/Notes/Learning/demo.md": {
+      "sourceHash": "sha256:33d490467ea58eb7e6f8a2469e583de586dd9f9c87c83933952550523b175a65",
+      "targets": {
+        "en": {
+          "path": "docs/en/Notes/Learning/demo.md",
+          "hash": "sha256:1d3bc70340fc43b2b136be0cb7f095779307d59fea250b1281b7ef664bcb1500",
+          "sourceHash": "sha256:33d490467ea58eb7e6f8a2469e583de586dd9f9c87c83933952550523b175a65"
+        },
+        "zh-tw": {
+          "path": "docs/zh-tw/Notes/Learning/demo.md",
+          "hash": "sha256:7dcb3d9618e9df3a985a99cc523697f1d26973ad8c0e34729e5cb8e4c8f2077f",
+          "sourceHash": "sha256:33d490467ea58eb7e6f8a2469e583de586dd9f9c87c83933952550523b175a65"
+        }
+      }
+    },
+    "docs/zh-cn/Notes/Learning/index.md": {
+      "sourceHash": "sha256:3826de0061e6faa7b68e45ad7a4703fd19deada603250c823ef46ac8b4cde734",
+      "targets": {
+        "en": {
+          "path": "docs/en/Notes/Learning/index.md",
+          "hash": "sha256:66d9ee9cd0fa9ef0282b1f154efdf654d2152a0266dd2966d59e65d795a165fc",
+          "sourceHash": "sha256:3826de0061e6faa7b68e45ad7a4703fd19deada603250c823ef46ac8b4cde734"
+        },
+        "zh-tw": {
+          "path": "docs/zh-tw/Notes/Learning/index.md",
+          "hash": "sha256:86e356987d498b68c6f92ef6d6a8d1276b831009d75e3adf830e0acbd106efa6",
+          "sourceHash": "sha256:3826de0061e6faa7b68e45ad7a4703fd19deada603250c823ef46ac8b4cde734"
+        }
+      }
+    },
+    "docs/zh-cn/Notes/Work/demo.md": {
+      "sourceHash": "sha256:17a98f4b14cbd9d90511aea19627042a285554baeae3ae6e793c3561911ca44e",
+      "targets": {
+        "en": {
+          "path": "docs/en/Notes/Work/demo.md",
+          "hash": "sha256:ed6a2551d74c6630e2c034fe357154ac10e2e6be6f00fa1c9b8b9addd10a214c",
+          "sourceHash": "sha256:17a98f4b14cbd9d90511aea19627042a285554baeae3ae6e793c3561911ca44e"
+        },
+        "zh-tw": {
+          "path": "docs/zh-tw/Notes/Work/demo.md",
+          "hash": "sha256:cf0dd08b0777c6da12ad252ad1b8a1b8c9c194837d5e80628bceebabf1245e0f",
+          "sourceHash": "sha256:17a98f4b14cbd9d90511aea19627042a285554baeae3ae6e793c3561911ca44e"
+        }
+      }
+    },
+    "docs/zh-cn/Notes/Work/index.md": {
+      "sourceHash": "sha256:8243248cdf79053ee31970718f2cb55642f32918bde366400c0139a5c1c3e4ae",
+      "targets": {
+        "en": {
+          "path": "docs/en/Notes/Work/index.md",
+          "hash": "sha256:95c79fbc58d559f7983f1df06dbb9cc8a036a8e8f7d1b9446a75d088a20230e3",
+          "sourceHash": "sha256:8243248cdf79053ee31970718f2cb55642f32918bde366400c0139a5c1c3e4ae"
+        },
+        "zh-tw": {
+          "path": "docs/zh-tw/Notes/Work/index.md",
+          "hash": "sha256:2253e986cb1e89cc3fad042e10804cb76440c4b738da73b1848f1b20871ac5a0",
+          "sourceHash": "sha256:8243248cdf79053ee31970718f2cb55642f32918bde366400c0139a5c1c3e4ae"
+        }
+      }
+    },
+    "docs/zh-cn/Notes/index.md": {
+      "sourceHash": "sha256:65e295832e601a5d9e1a964f160835eb6827c7dbf727e785d92abb27043d6270",
+      "targets": {
+        "en": {
+          "path": "docs/en/Notes/index.md",
+          "hash": "sha256:4d491e4a1c7a715289635fa1f13af687381ebdf440e6e4f36712fecf2feb318f",
+          "sourceHash": "sha256:65e295832e601a5d9e1a964f160835eb6827c7dbf727e785d92abb27043d6270"
+        },
+        "zh-tw": {
+          "path": "docs/zh-tw/Notes/index.md",
+          "hash": "sha256:55b445f03ca1357d757b3e01515fe1157d88494ac799581731f99ab3969cff48",
+          "sourceHash": "sha256:65e295832e601a5d9e1a964f160835eb6827c7dbf727e785d92abb27043d6270"
+        }
+      }
+    },
+    "docs/zh-cn/Projects/index.md": {
+      "sourceHash": "sha256:2ad672db32dba7a98c7859267116d80ff10f37d7ddb3446aef5d04cc3e75f3d0",
+      "targets": {
+        "en": {
+          "path": "docs/en/Projects/index.md",
+          "hash": "sha256:7ca17c192646406352d7bde732f68aa4036ed12b6d040e2d5196774bbfbe2e07",
+          "sourceHash": "sha256:2ad672db32dba7a98c7859267116d80ff10f37d7ddb3446aef5d04cc3e75f3d0"
+        },
+        "zh-tw": {
+          "path": "docs/zh-tw/Projects/index.md",
+          "hash": "sha256:f369c39183510e7e67cbc9cfc3975bac7fe491d74e1a35c7b0312b5dbdd53aa2",
+          "sourceHash": "sha256:2ad672db32dba7a98c7859267116d80ff10f37d7ddb3446aef5d04cc3e75f3d0"
+        }
+      }
+    },
+    "docs/zh-cn/index.md": {
+      "sourceHash": "sha256:4a600cf21d995305f7fd8df4470f168a3d0db299b4c1fd63d100e6fac9431105",
+      "targets": {
+        "en": {
+          "path": "docs/en/index.md",
+          "hash": "sha256:9c4d32ba10c7bb34a68cbb454ddcd87b0d8e800b3693f29aa9a488a2a47cb815",
+          "sourceHash": "sha256:4a600cf21d995305f7fd8df4470f168a3d0db299b4c1fd63d100e6fac9431105"
+        },
+        "zh-tw": {
+          "path": "docs/zh-tw/index.md",
+          "hash": "sha256:8398a3db8a57116239bb84edb7d149f4869efa9ab7ac318d5b6762c707cd8c2c",
+          "sourceHash": "sha256:4a600cf21d995305f7fd8df4470f168a3d0db299b4c1fd63d100e6fac9431105"
+        }
+      }
+    }
+  }
+}

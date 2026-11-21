@@ -1,13 +1,15 @@
 import DefaultTheme from 'vitepress/theme-without-fonts'
-import type { Theme } from 'vitepress'
-import { defineAsyncComponent, h } from 'vue'
+import { inBrowser, useData, type Theme } from 'vitepress'
+import { defineAsyncComponent, h, watchEffect } from 'vue'
 import './fonts/latin-modern.css'
 import './fonts/nerd-symbols.css'
 import './fonts/noto-emoji.css'
 import './fonts/twemoji.css'
 import './fonts/noto-sans-sc.css'
 import './style.css'
+import { themeColor } from '../theme-color.mjs'
 import LocalMermaid from './LocalMermaid.vue'
+import NotesIndex from './NotesIndex.vue'
 
 declare const __AI_SEARCH_ENABLED__: boolean
 
@@ -31,7 +33,33 @@ const Layout: Theme['Layout'] = __AI_SEARCH_ENABLED__
 export default {
     extends: DefaultTheme,
     Layout,
+    /*
+     * Keep the browser toolbar color in sync with the active appearance.
+     * The production head script sets it before first paint; this watcher
+     * covers the nav switch, OS preference changes while the choice is
+     * automatic, and the dev SPA (which does not execute head scripts). The
+     * tag is intentionally not declared in head.ts, so VitePress's route head
+     * updates do not replace it.
+     */
+    setup() {
+        if (!inBrowser) return
+        const { isDark } = useData()
+        watchEffect(() => {
+            let meta = document.querySelector<HTMLMetaElement>(
+                'meta[name="theme-color"]'
+            )
+            if (!meta) {
+                meta = document.createElement('meta')
+                meta.name = 'theme-color'
+                document.head.appendChild(meta)
+            }
+            meta.content = isDark.value
+                ? themeColor.dark
+                : themeColor.light
+        })
+    },
     enhanceApp({ app }) {
         app.component('LocalMermaid', LocalMermaid)
+        app.component('NotesIndex', NotesIndex)
     }
 } satisfies Theme

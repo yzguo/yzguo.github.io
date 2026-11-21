@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { link, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { link, mkdir, mkdtemp, rename, rm, rmdir, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
@@ -761,22 +761,6 @@ test('a config semantic failure fails the check', async (t) => {
   assert.match(result.errors[0], /ENOENT/)
 })
 
-test('a config load failure fails and is not silently skipped', async (t) => {
-  const rootDir = await basicProject(t)
-  const result = await checkWithConfig({
-    rootDir,
-    loadSiteConfigs: async () => {
-      throw new Error('cannot parse VitePress config')
-    },
-    requestModel: successfulRequest({ equivalent: true, issues: [] })
-  })
-
-  assert.equal(result.uiChecked, false)
-  assert.equal(result.errors.length, 1)
-  assert.match(result.errors[0], /unable to load VitePress locale configuration/)
-  assert.match(result.errors[0], /cannot parse VitePress config/)
-})
-
 test('an unparseable semantic verdict fails the check', async (t) => {
   const rootDir = await basicProject(t)
   const requestModel = async ({ prompt }) =>
@@ -1117,7 +1101,7 @@ test('formula, Mermaid structure, and link-target differences all block the mode
   assert.equal(calls, 0)
 })
 
-test('a config load failure blocks every semantic model request', async (t) => {
+test('a config load failure fails closed and blocks every semantic model request', async (t) => {
   const rootDir = await basicProject(t)
   const prompts = []
   const result = await checkMultilingual({
@@ -1129,7 +1113,9 @@ test('a config load failure blocks every semantic model request', async (t) => {
   })
 
   assert.equal(result.uiChecked, false)
-  assert.match(result.errors.join('\n'), /unable to load VitePress locale configuration/)
+  assert.equal(result.errors.length, 1)
+  assert.match(result.errors[0], /unable to load VitePress locale configuration/)
+  assert.match(result.errors[0], /cannot parse VitePress config/)
   assert.equal(result.semanticChecked, false)
   assert.equal(prompts.length, 0)
 })
@@ -1481,6 +1467,52 @@ test('a symbolic link to the protected model config blocks phase one and all mod
   assert.match(result.errors.join('\n'), /无法安全读取 Markdown 源文件/)
   assert.match(result.errors.join('\n'), /阶段一（结构）/)
   assert.doesNotMatch(JSON.stringify(result), new RegExp(sentinel))
+})
+
+test('a directory junction in a Markdown path blocks phase one and all model calls', async (t) => {
+  const rootDir = await basicProject(t)
+  const marker = 'JUNCTION_LINK_SENTINEL_7e42'
+  const targetDir = path.join(rootDir, 'link-target')
+  const englishDir = path.join(rootDir, 'docs', 'en')
+  await rename(englishDir, targetDir)
+  await writeFile(path.join(targetDir, 'index.md'), `# Home\n\n${marker}\n`, 'utf8')
+
+  // A Windows junction needs no symlink privilege, so this integration test
+  // exercises a real OS link even when single-file symlinks are unavailable.
+  try {
+    await symlink(
+      targetDir,
+      englishDir,
+      process.platform === 'win32' ? 'junction' : 'dir'
+    )
+  } catch (error) {
+    if (['ENOTSUP', 'ENOSYS'].includes(error.code)) {
+      t.skip(`directory links are unavailable: ${error.code}`)
+      return
+    }
+    throw error
+  }
+
+  try {
+    const prompts = []
+    const result = await checkWithConfig({
+      rootDir,
+      requestModel: successfulRequest({ equivalent: true, issues: [] }, prompts)
+    })
+
+    assert.equal(result.semanticChecked, false)
+    assert.equal(prompts.length, 0)
+    assert.match(result.errors.join('\n'), /无法安全读取 Markdown 源文件/)
+    assert.match(result.errors.join('\n'), /阶段一（结构）/)
+    assert.doesNotMatch(JSON.stringify(result), new RegExp(marker))
+    assert.doesNotMatch(prompts.join('\n'), new RegExp(marker))
+  } finally {
+    if (process.platform === 'win32') {
+      await rmdir(englishDir).catch(() => {})
+    } else {
+      await rm(englishDir, { force: true }).catch(() => {})
+    }
+  }
 })
 
 test('homepage frontmatter array and visible-key differences block the model', async (t) => {

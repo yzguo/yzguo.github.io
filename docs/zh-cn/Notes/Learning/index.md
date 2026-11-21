@@ -2,4 +2,4 @@
 
 阅读、练习和小实验中的记录。
 
-- [学习笔记演示](/zh-cn/Notes/Learning/demo) — 解释棱镜为什么能把白光分开的示例笔记。
+<NotesIndex />

@@ -1,18 +1,19 @@
 /**
  * Public, non-sensitive site options.
  *
- * The root `config.json` holds public feature options only:
- * `{ "aiSearch": { "enabled": false }, "performance": { "prefetchLinks": false } }`.
- * It is never imported by browser code: the VitePress config reads it at
- * build time and exposes only the resolved switches through the compile-time
- * `__AI_SEARCH_ENABLED__` constant and VitePress router options. Unknown
- * fields are rejected deliberately so credentials or provider settings can
- * never be smuggled into a published file.
+ * The root `config.json` holds two optional flat booleans:
+ * `{ "aiSearch": false, "prefetchLinks": false }`. A missing field means
+ * `false`. It is never imported by browser code: the VitePress config reads
+ * it at build time and exposes only the resolved switches through the
+ * compile-time `__AI_SEARCH_ENABLED__` constant and VitePress router options.
+ * Unknown fields and non-boolean values are rejected deliberately so
+ * credentials or provider settings can never be smuggled into a published
+ * file.
  *
- * Production builds always resolve to `false`, even when the public config
- * file says `true`. GitHub Pages is static and cannot host a private model
- * credential or a secure model backend, so enabling the switch there would
- * only display a button that cannot work.
+ * Production builds always resolve `aiSearch` to `false`, even when the
+ * public config file says `true`. GitHub Pages is static and cannot host a
+ * private model credential or a secure model backend, so enabling the switch
+ * there would only display a button that cannot work.
  */
 
 import { readFileSync, lstatSync, readdirSync, realpathSync, statSync } from 'node:fs'
@@ -439,55 +440,33 @@ export function scanPublishableResources({
 
 
 /**
- * Defaults used when the public config file is absent. Both public switches
- * are documented here:
- * - `aiSearch.enabled`: expose the local model-backed AI search endpoint on
- *   the Vite dev server. Production builds always disable it.
- * - `performance.prefetchLinks`: VitePress idle-time prefetch of in-viewport
- *   links. Off so a cold first paint does not request other pages, including
- *   the other locale homepages.
+ * Defaults used when the public config file is absent or a field is omitted.
+ * Both switches default to `false`:
+ * - `aiSearch`: expose the local model-backed AI search endpoint on the Vite
+ *   dev server. Production builds always disable it.
+ * - `prefetchLinks`: VitePress idle-time prefetch of in-viewport links. Off so
+ *   a cold first paint does not request other pages, including the other
+ *   locale homepages.
  * Deep-frozen so callers cannot mutate the shared defaults.
  */
 export const DEFAULT_SITE_CONFIG = Object.freeze({
-    aiSearch: Object.freeze({ enabled: false }),
-    performance: Object.freeze({ prefetchLinks: false }),
+    aiSearch: false,
+    prefetchLinks: false,
 })
+
+const SITE_CONFIG_FIELDS = Object.freeze(['aiSearch', 'prefetchLinks'])
 
 function isPlainObject(value) {
     return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
 
-/** Validate one public section that holds exactly one boolean field. */
-function readBooleanSection(value, sectionName, fieldName) {
-    const section = value[sectionName]
-    if (!isPlainObject(section)) {
-        throw new TypeError(
-            `${SITE_CONFIG_FILENAME} field "${sectionName}" must be an object.`
-        )
-    }
-
-    const keys = Object.keys(section)
-    if (keys.length !== 1 || keys[0] !== fieldName) {
-        throw new TypeError(
-            `${SITE_CONFIG_FILENAME} field "${sectionName}" must contain only the boolean field "${fieldName}".`
-        )
-    }
-    if (typeof section[fieldName] !== 'boolean') {
-        throw new TypeError(
-            `${SITE_CONFIG_FILENAME} field "${sectionName}.${fieldName}" must be a boolean.`
-        )
-    }
-
-    return section[fieldName]
-}
-
 /**
- * Accept exactly
- * `{ "aiSearch": { "enabled": <boolean> }, "performance": { "prefetchLinks": <boolean> } }`
- * and return the same public shape. Rejecting extra fields is deliberate:
- * this file is public, and the client must never receive environment or
- * provider configuration through it. Future public feature options are added
- * explicitly here, never by accepting unknown keys.
+ * Accept `{}` or any subset of
+ * `{ "aiSearch": <boolean>, "prefetchLinks": <boolean> }` and return both
+ * switches, defaulting omitted fields to `false`. Rejecting extra fields is
+ * deliberate: this file is public, and the client must never receive
+ * environment or provider configuration through it. Future public feature
+ * options are added explicitly here, never by accepting unknown keys.
  */
 export function parseSiteConfig(value) {
     if (!isPlainObject(value)) {
@@ -496,30 +475,24 @@ export function parseSiteConfig(value) {
         )
     }
 
-    const keys = Object.keys(value)
-    const sections = ['aiSearch', 'performance']
-    if (
-        keys.length !== sections.length ||
-        !sections.every((name) =>
-            Object.prototype.hasOwnProperty.call(value, name)
-        )
-    ) {
-        throw new TypeError(
-            `${SITE_CONFIG_FILENAME} must contain only the object fields "aiSearch" and "performance".`
-        )
+    const config = { ...DEFAULT_SITE_CONFIG }
+    for (const key of Object.keys(value)) {
+        if (!SITE_CONFIG_FIELDS.includes(key)) {
+            // Never echo a field name: a rejected public file may contain a
+            // secret disguised as a key.
+            throw new TypeError(
+                `${SITE_CONFIG_FILENAME} contains an unsupported field.`
+            )
+        }
+        if (typeof value[key] !== 'boolean') {
+            throw new TypeError(
+                `${SITE_CONFIG_FILENAME} field "${key}" must be a boolean.`
+            )
+        }
+        config[key] = value[key]
     }
 
-    const enabled = readBooleanSection(value, 'aiSearch', 'enabled')
-    const prefetchLinks = readBooleanSection(
-        value,
-        'performance',
-        'prefetchLinks'
-    )
-
-    return Object.freeze({
-        aiSearch: Object.freeze({ enabled }),
-        performance: Object.freeze({ prefetchLinks }),
-    })
+    return Object.freeze(config)
 }
 
 /**
@@ -557,8 +530,8 @@ export function readSiteConfig(
 /**
  * Resolve the AI search client/server switch from the public site options.
  * Only a development server can enable AI search; `vitepress build` is always
- * disabled by construction. The performance options do not affect this.
+ * disabled by construction. `prefetchLinks` does not affect this.
  */
 export function resolveAiSearchEnabled(command, config) {
-    return command === 'serve' && config?.aiSearch?.enabled === true
+    return command === 'serve' && config?.aiSearch === true
 }

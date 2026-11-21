@@ -1,8 +1,4 @@
 {
-    "aiSearch": {
-        "enabled": false
-    },
-    "performance": {
-        "prefetchLinks": false
-    }
+    "aiSearch": false,
+    "prefetchLinks": false
 }

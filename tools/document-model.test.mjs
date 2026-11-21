@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { link, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { link, lstat, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
@@ -101,6 +101,26 @@ function info({ symlink = false, directory = false, file = false } = {}) {
     isSymbolicLink: () => symlink,
     isDirectory: () => directory,
     isFile: () => file
+  }
+}
+
+// Metadata-only simulation for platforms that cannot create a file symlink
+// without extra privileges. The underlying file stays a real, readable decoy,
+// so a regression in the symlink rejection would be caught by the read test.
+function injectedSymlinkFileSystem(linkPath) {
+  const linkKey = path.resolve(linkPath)
+  return {
+    lstat: async (target) => {
+      if (path.resolve(target) === linkKey) {
+        return {
+          isSymbolicLink: () => true,
+          isDirectory: () => false,
+          isFile: () => false
+        }
+      }
+      return lstat(target)
+    },
+    realpath
   }
 }
 
@@ -369,6 +389,38 @@ test('safe Markdown read rejects a symlinked parent directory', async (t) => {
     readSafeMarkdownSource(path.join(linkedDirectory, 'page.md'), {
       rootDir,
       protectedIdentities: new Set()
+    })
+  )
+  assert.equal(error.code, SAFE_MARKDOWN_READ_FAILED)
+})
+
+test('safe Markdown read rejects injected symlink metadata for a source', async (t) => {
+  const rootDir = await makeSafetyRoot(t)
+  const decoy = path.join(rootDir, 'docs', 'zh-cn', 'injected-link.md')
+  await writeFile(decoy, '# 不应被读取\n', 'utf8')
+
+  const error = await captureReadError(
+    readSafeMarkdownSource(decoy, {
+      rootDir,
+      protectedIdentities: new Set(),
+      fs: injectedSymlinkFileSystem(decoy)
+    })
+  )
+  assert.equal(error.code, SAFE_MARKDOWN_READ_FAILED)
+})
+
+test('safe Markdown read rejects injected symlink metadata for a parent directory', async (t) => {
+  const rootDir = await makeSafetyRoot(t)
+  const linkedDirectory = path.join(rootDir, 'docs', 'zh-cn', 'injected-parent')
+  const page = path.join(linkedDirectory, 'page.md')
+  await mkdir(linkedDirectory, { recursive: true })
+  await writeFile(page, '# 不应被读取\n', 'utf8')
+
+  const error = await captureReadError(
+    readSafeMarkdownSource(page, {
+      rootDir,
+      protectedIdentities: new Set(),
+      fs: injectedSymlinkFileSystem(linkedDirectory)
     })
   )
   assert.equal(error.code, SAFE_MARKDOWN_READ_FAILED)
